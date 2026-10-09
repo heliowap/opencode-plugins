@@ -4,8 +4,10 @@ OpenCode 2 plugin that enforces which model a subagent runs on, per agent, with
 provider fallback.
 
 The parent session can pass any `model` to the `subagent` tool. For agents with a
-policy, the plugin replaces it with the policy route, so a delegated agent always
-runs where you decided it should.
+policy, an `execute.before` hook replaces it with the policy route, so a delegated
+agent always runs where you decided it should. The plugin does not wrap the
+`subagent` tool itself: in OpenCode 2.0.25 a wrapped tool reports the wrong error
+for parallel calls that fail.
 
 ## Policy
 
@@ -25,19 +27,20 @@ Every other agent keeps the model the parent chose. Routes are defined in
 ## Fallback
 
 A provider failure (rate limit, quota, auth, transport, timeout, missing route,
-provider error) on a foreground dispatch retries once on the next route. A route
-that failed is moved to the back for 10 minutes.
+provider error) moves the failed route to the back for 10 minutes. The failure
+is returned to the parent, and its next dispatch of that agent starts on the
+next route. This works the same for foreground and background dispatches.
 
 - Rate-limit and quota failures skip OpenCode's own retries when another route
-  is available, so fallback happens in seconds instead of minutes.
+  is available, so the failure reaches the parent in seconds instead of minutes.
+- Other provider errors (5xx, transport) keep OpenCode's retries, about 80
+  seconds, before the route is demoted.
 - Task failures (invalid request, content filter, tool errors) and cancellation
-  are returned to the parent unchanged.
-- Background dispatches return immediately, so they cannot fall back in the
-  same call. Their provider failure still demotes the route, and the next
-  dispatch starts on the next route.
+  do not demote the route.
 
-Each result carries `metadata.modelPolicy`: the agent, the requested model, the
-skipped routes and every attempt with its outcome. Prompts are never recorded.
+Each successful result carries `metadata.modelPolicy`: the agent, the requested
+model, the chosen route, the skipped routes and the demoted routes. Prompts are
+never recorded.
 
 ## Coverage
 

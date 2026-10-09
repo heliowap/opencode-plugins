@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { toolResults, type Call, type Reply } from "./harness/fixture.ts"
+import { FAILED, redispatching, toolResults, type Call, type Reply } from "./harness/fixture.ts"
 import { Host, type HostOptions } from "./harness/host.ts"
 
 const TIMEOUT = 120_000
@@ -19,6 +19,13 @@ const dispatch = (args: Record<string, unknown>, child: (call: Call) => Reply = 
     if (toolResults(call.request).length) return { text: "parent done" }
     return { tool: "subagent", args: { description: "look it up", prompt: "find the fact", ...args } }
   }
+
+const recovering =
+  (args: Record<string, unknown>, child: (call: Call) => Reply, maxRounds = 3) =>
+  (call: Call): Reply =>
+    call.provider === "fixture"
+      ? redispatching([{ description: "look it up", prompt: "find the fact", ...args }], maxRounds)(call.request)
+      : child(call)
 
 const run = async (options: HostOptions) => {
   host = await Host.start(options)
@@ -67,20 +74,20 @@ describe("research dispatch", () => {
   )
 
   test(
-    "a rate-limited direct route falls back once to proxied Sol in fast mode without exhausting retries",
+    "a rate-limited direct route fails fast, and the re-dispatch runs on proxied Sol in fast mode",
     async () => {
-      const { host, session } = await run({ script: dispatch({ agent: "researcher" }, failing({ openai: 429 })) })
+      const { host, session } = await run({ script: recovering({ agent: "researcher" }, failing({ openai: 429 })) })
 
       expect(childRoutes(host.fixture.agentCalls())).toEqual(["openai/gpt-6.1-sol#low", "cli_proxy_openai/gpt-6.1-sol#low+fast"])
       expect(parentToolResult(host.fixture.calls)).toContain("child answer from cli_proxy_openai")
-      const trail = (await toolParts(host, session))[0]!.state.metadata.modelPolicy
+      const [failed, recovered] = await toolParts(host, session)
+      expect(failed!.state.status).toBe("error")
+      const trail = recovered!.state.metadata.modelPolicy
       expect(trail).toEqual({
         agent: "researcher",
+        route: "cli_proxy_openai/gpt-6.1-sol#fast-low",
         skipped: [],
-        attempts: [
-          { route: "openai/gpt-6.1-sol#low", outcome: "provider-failure", error: "Tool.Error" },
-          { route: "cli_proxy_openai/gpt-6.1-sol#fast-low", outcome: "completed" },
-        ],
+        demoted: ["openai/gpt-6.1-sol#low"],
       })
       expect(JSON.stringify(trail)).not.toContain("find the fact")
     },
@@ -88,21 +95,21 @@ describe("research dispatch", () => {
   )
 
   test(
-    "a request the provider rejects as invalid is a task failure and keeps the route",
+    "a request the provider rejects as invalid is a task failure: the route stays first for the re-dispatch",
     async () => {
-      const { host } = await run({ script: dispatch({ agent: "researcher" }, failing({ openai: 400 })) })
+      const { host } = await run({ script: recovering({ agent: "researcher" }, failing({ openai: 400 }), 2) })
 
-      expect(childRoutes(host.fixture.agentCalls())).toEqual(["openai/gpt-6.1-sol#low"])
-      expect(parentToolResult(host.fixture.calls)).toContain("Subagent failed")
+      expect(childRoutes(host.fixture.agentCalls())).toEqual(["openai/gpt-6.1-sol#low", "openai/gpt-6.1-sol#low"])
+      expect(parentToolResult(host.fixture.calls)).toContain(FAILED)
     },
     TIMEOUT,
   )
 
   test(
-    "when every route fails at the provider, each is tried once and the parent gets an explicit error",
+    "when every route fails at the provider, successive re-dispatches walk the routes in order",
     async () => {
       const { host } = await run({
-        script: dispatch({ agent: "researcher" }, failing({ openai: 401, cli_proxy_openai: 401, cli_proxy: 401 })),
+        script: recovering({ agent: "researcher" }, failing({ openai: 401, cli_proxy_openai: 401, cli_proxy: 401 })),
       })
 
       expect(childRoutes(host.fixture.agentCalls())).toEqual([
@@ -110,7 +117,7 @@ describe("research dispatch", () => {
         "cli_proxy_openai/gpt-6.1-sol#low+fast",
         "cli_proxy/cpa-claude-opus-5-5#low",
       ])
-      expect(parentToolResult(host.fixture.calls)).toContain("every allowed route failed at the provider")
+      expect(parentToolResult(host.fixture.calls)).toContain(FAILED)
     },
     TIMEOUT,
   )
@@ -209,7 +216,7 @@ describe.skipIf(!HAS_GLOBAL_PLUGINS)("coexistence", () => {
     "fallback still works with the global model-routes and redact-secrets plugins loaded",
     async () => {
       const { host } = await run({
-        script: dispatch({ agent: "researcher" }, failing({ openai: 429 })),
+        script: recovering({ agent: "researcher" }, failing({ openai: 429 })),
         extraPlugins: [join(GLOBAL_PLUGINS, "model-routes.ts"), join(GLOBAL_PLUGINS, "redact-secrets.ts")],
       })
 

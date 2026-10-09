@@ -1,6 +1,8 @@
 export interface ChatMessage {
   readonly role: string
   readonly content?: unknown
+  readonly tool_call_id?: string
+  readonly tool_calls?: ReadonlyArray<{ readonly id: string; readonly function: { readonly name: string; readonly arguments: string } }>
 }
 
 export interface ChatRequest {
@@ -18,7 +20,9 @@ export interface Call {
 export type Reply =
   | { readonly text: string; readonly delayMs?: number }
   | { readonly tool: string; readonly args: Record<string, unknown> }
-  | { readonly status: number; readonly error: string }
+  | { readonly tools: ReadonlyArray<{ readonly tool: string; readonly args: Record<string, unknown> }> }
+  | { readonly status: number; readonly error: string; readonly delayMs?: number }
+  | { readonly malformed: true }
 
 export type Script = (call: Call) => Reply
 
@@ -32,6 +36,26 @@ export const text = (message: ChatMessage) =>
 export const isTitleRequest = (request: ChatRequest) => !request.tools?.length
 
 export const toolResults = (request: ChatRequest) => request.messages.filter((message) => message.role === "tool").map(text)
+
+export const FAILED = "Subagent failed"
+
+/**
+ * A parent turn that dispatches `first`, then dispatches again every subagent call whose
+ * result reports a failure, the way a parent recovers from a provider failure.
+ */
+export const redispatching =
+  (first: ReadonlyArray<Record<string, unknown>>, maxRounds = 3) =>
+  (request: ChatRequest): Reply => {
+    const rounds = request.messages.filter((message) => message.role === "assistant" && message.tool_calls?.length)
+    const last = rounds.at(-1)
+    if (!last) return { tools: first.map((args) => ({ tool: "subagent", args })) }
+    const failed = last.tool_calls!.filter((call) => {
+      const result = request.messages.find((message) => message.role === "tool" && message.tool_call_id === call.id)
+      return result !== undefined && text(result).includes(FAILED)
+    })
+    if (failed.length === 0 || rounds.length >= maxRounds) return { text: "parent done" }
+    return { tools: failed.map((call) => ({ tool: "subagent", args: JSON.parse(call.function.arguments) })) }
+  }
 
 const chunk = (id: number, delta: object, finish: string | null) =>
   `data: ${JSON.stringify({
@@ -64,12 +88,24 @@ export const startFixture = (script: Script): Fixture => {
       const reply: Reply = isTitleRequest(call.request) ? { text: "Fixture title" } : fixture.script(call)
       if ("delayMs" in reply && reply.delayMs) await Bun.sleep(reply.delayMs)
       if ("status" in reply) return Response.json({ error: { message: reply.error, type: "fixture_error" } }, { status: reply.status })
+      if ("malformed" in reply) return new Response("data: {not json\n\n", { headers: { "content-type": "text/event-stream" } })
       const n = calls.length
-      const body =
-        "tool" in reply
-          ? chunk(n, { role: "assistant", tool_calls: [{ index: 0, id: `call-${n}`, type: "function", function: { name: reply.tool, arguments: JSON.stringify(reply.args) } }] }, null) +
-            chunk(n, {}, "tool_calls")
-          : chunk(n, { role: "assistant", content: reply.text }, null) + chunk(n, {}, "stop")
+      const toolCalls = "tool" in reply ? [reply] : "tools" in reply ? reply.tools : undefined
+      const body = toolCalls
+        ? chunk(
+            n,
+            {
+              role: "assistant",
+              tool_calls: toolCalls.map((call, index) => ({
+                index,
+                id: `call-${n}-${index}`,
+                type: "function",
+                function: { name: call.tool, arguments: JSON.stringify(call.args) },
+              })),
+            },
+            null,
+          ) + chunk(n, {}, "tool_calls")
+        : chunk(n, { role: "assistant", content: (reply as { text: string }).text }, null) + chunk(n, {}, "stop")
       return new Response(body + "data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } })
     },
   })
