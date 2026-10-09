@@ -1,0 +1,23 @@
+{
+  "name": "opencode-v2-model-policy",
+  "version": "0.1.0",
+  "description": "Enforces the model route of delegated subagent work in OpenCode",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "test:host": "bun test ./host",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.0.24"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@typescript/native-preview": "^7.0.0-dev"
+  },
+  "license": "MIT"
+}
