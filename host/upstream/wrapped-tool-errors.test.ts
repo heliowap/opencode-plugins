@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { text, toolResults, type Call, type Reply } from "../harness/fixture.ts"
+import { OPUS, text, toolResults, type Call, type Reply } from "../harness/fixture.ts"
 import { Host } from "../harness/host.ts"
 
 // Upstream OpenCode bug: once a plugin wraps a tool's execute through tool.transform, parallel
@@ -27,7 +27,7 @@ test.failing(
         return {
           tools: CASES.map((index) => ({
             tool: "subagent",
-            args: { agent: "implementer", model: "cli_proxy/cpa-claude-opus-5-5#low", description: `case ${index}`, prompt: `case-${index}` },
+            args: { agent: "implementer", model: `${OPUS}#low`, description: `case ${index}`, prompt: `case-${index}` },
           })),
         }
       },

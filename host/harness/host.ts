@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
-import { startFixture, type Fixture, type Script } from "./fixture.ts"
+import { OPUS, startFixture, type Fixture, type Script } from "./fixture.ts"
 
 const REPO = resolve(import.meta.dir, "../..")
 const PASSWORD = "fixture-password"
@@ -80,7 +80,7 @@ export class Host {
         agents: {
           researcher: { mode: "subagent", description: "Fixture researcher", model: "fixture/test" },
           implementer: { mode: "subagent", description: "Fixture implementer" },
-          planner: { mode: "subagent", description: "Fixture planner", model: "cli_proxy/cpa-claude-opus-5-5#medium" },
+          planner: { mode: "subagent", description: "Fixture planner", model: `${OPUS}#medium` },
         },
         permissions: [{ action: "*", resource: "*", effect: "allow" }, ...(options.permissions?.(config) ?? [])],
       }),
