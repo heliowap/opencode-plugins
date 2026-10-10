@@ -1,11 +1,12 @@
-import { afterAll, beforeAll, expect, test } from "bun:test"
-import { readFileSync, writeFileSync } from "node:fs"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { text, type Call, type ChatMessage, type Reply } from "./harness/fixture.ts"
 import { Host } from "./harness/host.ts"
 
 const ORIGINAL = "# Global rules\n"
-const QUESTION = "Do you want to proceed with editing the global AGENTS.md?"
+const QUESTION = "Do you want to proceed with editing AGENTS.md?"
+const DENIED = "AGENTS.md files are protected"
 type Step = { tool: string; args: Record<string, unknown> }
 type Plan = (dir: string) => Step[][]
 
@@ -42,7 +43,10 @@ const ask = (question = QUESTION): Step => ({
 
 const run = async (testPlan: Plan, answer: string | undefined, prompts = 1, directory?: string) => {
   const agents = join(host.configDir, "AGENTS.md")
+  const repoAgents = join(host.project, "AGENTS.md")
   writeFileSync(agents, ORIGINAL)
+  writeFileSync(repoAgents, ORIGINAL)
+  rmSync(join(host.project, "pkg"), { recursive: true, force: true })
   plan = testPlan
   const firstCall = host.fixture.calls.length
   const session = await host.session("build", directory)
@@ -64,7 +68,12 @@ const run = async (testPlan: Plan, answer: string | undefined, prompts = 1, dire
     }
   }
   const results = host.fixture.calls.slice(firstCall).flatMap((c) => c.request.messages).filter((m) => m.role === "tool").map(text)
-  return { changed: readFileSync(agents, "utf8") !== ORIGINAL, forms, denied: results.some((r) => r.includes("The global AGENTS.md is protected")) }
+  return {
+    changed: readFileSync(agents, "utf8") !== ORIGINAL,
+    repoChanged: readFileSync(repoAgents, "utf8") !== ORIGINAL,
+    forms,
+    denied: results.some((r) => r.includes(DENIED)),
+  }
 }
 
 test("an edit without a question is denied", async () => {
@@ -122,3 +131,45 @@ test("other files and reads are not affected", async () => {
   expect(readFileSync(join(host.configDir, "notes.md"), "utf8")).toBe("b\n")
   expect(outcome).toMatchObject({ changed: false, denied: false })
 }, 60_000)
+
+describe("AGENTS.md in repos", () => {
+  test("an absolute write to a repo AGENTS.md is denied", async () => {
+    const outcome = await run(() => [[{ tool: "write", args: { path: join(host.project, "AGENTS.md"), content: "x\n" } }]], undefined)
+    expect(outcome).toMatchObject({ repoChanged: false, denied: true })
+  }, 60_000)
+
+  test("a relative edit inside a repo is denied", async () => {
+    const outcome = await run(() => [[{ tool: "edit", args: { path: "AGENTS.md", oldString: "Global", newString: "X" } }]], undefined, 1, host.project)
+    expect(outcome).toMatchObject({ repoChanged: false, denied: true })
+  }, 60_000)
+
+  test("a shell append inside a repo is denied", async () => {
+    const outcome = await run(() => [[{ tool: "shell", args: { command: "printf x >> AGENTS.md" } }]], undefined, 1, host.project)
+    expect(outcome).toMatchObject({ repoChanged: false, denied: true })
+  }, 60_000)
+
+  test("creating a new AGENTS.md in a subfolder is denied", async () => {
+    const created = join(host.project, "pkg", "AGENTS.md")
+    const outcome = await run(() => [[{ tool: "write", args: { path: created, content: "x\n" } }]], undefined)
+    expect(outcome.denied).toBe(true)
+    expect(existsSync(created)).toBe(false)
+  }, 60_000)
+
+  test("a different letter case is denied", async () => {
+    const outcome = await run(() => [[{ tool: "write", args: { path: join(host.project, "pkg", "agents.md"), content: "x\n" } }]], undefined)
+    expect(outcome.denied).toBe(true)
+    expect(existsSync(join(host.project, "pkg", "agents.md"))).toBe(false)
+  }, 60_000)
+
+  test("Yes to the question allows a repo edit", async () => {
+    const outcome = await run(() => [[ask(), { tool: "write", args: { path: join(host.project, "AGENTS.md"), content: "x\n" } }]], "Yes")
+    expect(outcome).toMatchObject({ repoChanged: true, forms: 1 })
+  }, 60_000)
+
+  test("other repo files are not affected", async () => {
+    const readme = join(host.project, "README.md")
+    const outcome = await run(() => [[{ tool: "write", args: { path: readme, content: "hello\n" } }]], undefined)
+    expect(readFileSync(readme, "utf8")).toBe("hello\n")
+    expect(outcome.denied).toBe(false)
+  }, 60_000)
+})

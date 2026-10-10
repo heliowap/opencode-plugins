@@ -1,33 +1,34 @@
 # opencode-v2-protect-agents-md
 
-An OpenCode v2 plugin that stops agents from editing your global `AGENTS.md`
-(`$XDG_CONFIG_HOME/opencode/AGENTS.md`, by default `~/.config/opencode/AGENTS.md`)
-without your explicit approval.
+An OpenCode v2 plugin that stops agents from editing any `AGENTS.md` without
+your explicit approval: the global one (`~/.config/opencode/AGENTS.md`) and
+every repo's, including creating a new one.
 
 ## Behavior
 
 - **Denied by default.** The plugin denies:
-  - `edit` permissions (edit, write, patch) whose target resolves to the global
-    `AGENTS.md`, including relative paths, `~` paths and symlinks;
-  - shell commands whose text names `AGENTS.md` together with the config
-    directory (absolute path, `~/.config/opencode`, `$HOME/.config/opencode` or
-    `$XDG_CONFIG_HOME/opencode`), or that name `AGENTS.md` while running with
-    the config directory as working directory.
+  - `edit` permissions (edit, write, patch) whose target file is named
+    `AGENTS.md` in any letter case, in any directory, including relative paths,
+    `~` paths, symlinks and files that do not exist yet;
+  - shell commands whose text mentions `AGENTS.md` in any letter case.
 
   The denial message tells the agent to ask you first.
 - **Approval.** The agent must ask through the question tool, with exactly
-  this question: "Do you want to proceed with editing the global AGENTS.md?".
+  this question: "Do you want to proceed with editing AGENTS.md?".
   Only the answer `Yes` (that option alone, not a custom answer) unlocks edits.
-- **Scope of the approval.** It applies to that session only and lasts until
-  your next message in it.
+- **Scope of the approval.** It applies to every `AGENTS.md` in that session
+  only, and lasts until your next message in it.
 - **Works with `session.permissions: autoaccept`.** The plugin denies instead
   of asking, so an auto-accepting client cannot approve the edit for you.
 
 ## Limitations
 
 - Shell matching is textual. Read-only shell commands that name the file (for
-  example `cat ~/.config/opencode/AGENTS.md`) are denied too; use the read tool
-  instead, which is not affected.
+  example `cat AGENTS.md` or `git diff AGENTS.md`) are denied too; use the read
+  tool instead, which is not affected. `git add -A` and `git status` do not name
+  the file and are not affected.
+- Commands such as `/init` that create or update `AGENTS.md` also need your
+  `Yes`.
 - Scripts that build the path indirectly (variables, string concatenation,
   another script) are not detected.
 
