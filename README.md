@@ -13,7 +13,7 @@ for parallel calls that fail.
 
 | Agent | Routes, in order |
 | --- | --- |
-| `researcher`, `explore` | `openai/gpt-6.1-sol#low` → `cli_proxy_openai/gpt-6.1-sol#fast-low` → `cli_proxy/cpa-claude-opus-5-5#low` |
+| `researcher`, `explore` | `cli_proxy/cpa-claude-sonnet-5-5#medium` → `cli_proxy/cpa-claude-opus-5-5#low` |
 | `planner` | `cli_proxy/cpa-claude-opus-5-5#high` |
 
 Every other agent keeps the model the parent chose. Routes are defined in
@@ -22,7 +22,7 @@ Every other agent keeps the model the parent chose. Routes are defined in
 - A route missing from the model catalog, or lacking the effort variant, is
   skipped. If no route is left, the dispatch fails instead of using another model.
 - A route uses the `fast-<effort>` variant when the catalog offers it and the
-  policy prefers fast mode (research routes do; the planner does not).
+  policy prefers fast mode. No current route prefers it.
 
 ## Fallback
 

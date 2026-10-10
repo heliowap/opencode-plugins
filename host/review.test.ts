@@ -53,7 +53,7 @@ describe.skipIf(!HAS_SKILL)("code-review skill activation", () => {
 
       const parentCalls = host.fixture.calls.filter((call) => call.provider === "fixture")
       expect(parentCalls.some((call) => toolResults(call.request).some((result) => result.includes("Two-axis review")))).toBe(true)
-      expect(childRoutes(host.fixture.agentCalls())).toEqual(["openai/gpt-6.1-sol#low"])
+      expect(childRoutes(host.fixture.agentCalls())).toEqual(["cli_proxy/cpa-claude-sonnet-5-5#medium"])
     },
     TIMEOUT,
   )

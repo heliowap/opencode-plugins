@@ -9,7 +9,8 @@ const PROXY_SOL: CatalogModel = {
   variants: [...EFFORTS, "fast", "fast-low", "fast-medium"],
 }
 const OPUS: CatalogModel = { providerID: "cli_proxy", id: "cpa-claude-opus-5-5", variants: EFFORTS }
-const FULL = [DIRECT, PROXY_SOL, OPUS]
+const SONNET: CatalogModel = { providerID: "cli_proxy", id: "cpa-claude-sonnet-5-5", variants: EFFORTS }
+const FULL = [DIRECT, PROXY_SOL, OPUS, SONNET]
 
 describe("roles without an approved policy", () => {
   test.each(["implementer", "general", "build", "comment-sicko"])("%s keeps its own model selection", (agent) => {
@@ -40,59 +41,61 @@ describe("planner policy", () => {
 })
 
 describe("research policy", () => {
-  test("the direct OpenAI route comes first, at low effort", () => {
+  test("Sonnet 5.5 comes first, at medium effort", () => {
     const resolution = resolve("researcher", FULL)
 
     expect(resolution.kind).toBe("routes")
     if (resolution.kind !== "routes") return
-    expect(resolution.routes[0]).toEqual({ providerID: "openai", model: "gpt-6.1-sol", variant: "low" })
+    expect(resolution.routes[0]).toEqual({ providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", variant: "medium" })
   })
 
-  test("falls back to proxied Sol in fast mode, then Opus, both at low effort", () => {
-    const resolution = resolve("researcher", FULL)
-
-    expect(resolution).toMatchObject({
+  test("falls back only to Opus 5.5 at low effort, never to Sol", () => {
+    expect(resolve("researcher", FULL)).toEqual({
       kind: "routes",
       routes: [
-        { providerID: "openai", model: "gpt-6.1-sol", variant: "low" },
-        { providerID: "cli_proxy_openai", model: "gpt-6.1-sol", variant: "fast-low" },
+        { providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", variant: "medium" },
         { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", variant: "low" },
       ],
+      skipped: [],
     })
+  })
+
+  test("does not switch to fast mode even when the routes offer it", () => {
+    const fast = [...EFFORTS, "fast-low", "fast-medium"]
+    const resolution = resolve("researcher", [{ ...SONNET, variants: fast }, { ...OPUS, variants: fast }])
+
+    expect(resolution).toMatchObject({ routes: [{ variant: "medium" }, { variant: "low" }] })
   })
 
   test("routes missing from the catalog or lacking the effort variant are skipped with a reason", () => {
     const opusWithoutLow = { ...OPUS, variants: ["high", "max"] }
-    const resolution = resolve("researcher", [PROXY_SOL, opusWithoutLow])
 
-    expect(resolution).toEqual({
+    expect(resolve("researcher", [opusWithoutLow])).toEqual({
       kind: "routes",
-      routes: [{ providerID: "cli_proxy_openai", model: "gpt-6.1-sol", variant: "fast-low" }],
+      routes: [],
       skipped: [
-        { route: "openai/gpt-6.1-sol", reason: "not in the available model catalog" },
+        { route: "cli_proxy/cpa-claude-sonnet-5-5", reason: "not in the available model catalog" },
         { route: "cli_proxy/cpa-claude-opus-5-5", reason: "variant low is not available" },
       ],
     })
   })
 
-  test("a route that recently failed at the provider moves behind the healthy ones", () => {
-    const resolution = resolve("researcher", FULL, new Set(["openai/gpt-6.1-sol"]))
+  test("a route that recently failed at the provider moves behind the healthy one", () => {
+    const resolution = resolve("researcher", FULL, new Set(["cli_proxy/cpa-claude-sonnet-5-5"]))
 
     expect(resolution).toMatchObject({
       routes: [
-        { providerID: "cli_proxy_openai", variant: "fast-low" },
-        { providerID: "cli_proxy", variant: "low" },
-        { providerID: "openai", variant: "low" },
+        { model: "cpa-claude-opus-5-5", variant: "low" },
+        { model: "cpa-claude-sonnet-5-5", variant: "medium" },
       ],
     })
   })
 
   test("with every route failing, the declared order is kept", () => {
-    const all = new Set(["openai/gpt-6.1-sol", "cli_proxy_openai/gpt-6.1-sol", "cli_proxy/cpa-claude-opus-5-5"])
-    const resolution = resolve("researcher", FULL, all)
+    const all = new Set(["cli_proxy/cpa-claude-sonnet-5-5", "cli_proxy/cpa-claude-opus-5-5"])
 
-    expect(resolution).toMatchObject({
-      routes: [{ providerID: "openai" }, { providerID: "cli_proxy_openai" }, { providerID: "cli_proxy" }],
+    expect(resolve("researcher", FULL, all)).toMatchObject({
+      routes: [{ model: "cpa-claude-sonnet-5-5" }, { model: "cpa-claude-opus-5-5" }],
     })
   })
 })

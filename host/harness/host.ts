@@ -11,7 +11,7 @@ const FAST = [{ id: "fast-low", settings: { reasoningEffort: "low" }, body: { se
 export const ROUTE_PROVIDERS = {
   openai: { "gpt-6.1-sol": EFFORTS },
   cli_proxy_openai: { "gpt-6.1-sol": [...EFFORTS, ...FAST] },
-  cli_proxy: { "cpa-claude-opus-5-5": EFFORTS },
+  cli_proxy: { "cpa-claude-sonnet-5-5": EFFORTS, "cpa-claude-opus-5-5": EFFORTS },
 } as const
 
 export interface HostOptions {
@@ -66,7 +66,10 @@ export class Host {
       await mkdir(dir, { recursive: true })
     }
     const fixture = startFixture(options.script)
-    const routes = Object.entries(ROUTE_PROVIDERS).filter(([id]) => !options.omit?.includes(id))
+    const omitted = (key: string) => options.omit?.includes(key) ?? false
+    const routes = Object.entries(ROUTE_PROVIDERS)
+      .filter(([id]) => !omitted(id))
+      .map(([id, models]) => [id, Object.fromEntries(Object.entries(models).filter(([model]) => !omitted(`${id}/${model}`)))] as const)
     await writeFile(
       join(config, "opencode.jsonc"),
       JSON.stringify({

@@ -26,15 +26,12 @@ interface Candidate {
   readonly preferFast: boolean
 }
 
-// Research row of the Subagents section in ~/.config/opencode/AGENTS.md, with the direct
-// ChatGPT route the user approved ahead of CLIProxy. Explore and planner rules were approved
-// directly by the user.
 const RESEARCH: readonly Candidate[] = [
-  { providerID: "openai", model: "gpt-6.1-sol", effort: "low", preferFast: true },
-  { providerID: "cli_proxy_openai", model: "gpt-6.1-sol", effort: "low", preferFast: true },
-  { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "low", preferFast: true },
+  { providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", effort: "medium", preferFast: false },
+  { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "low", preferFast: false },
 ]
 
+// Research, explore and planner rules were approved directly by the user.
 const POLICIES: Readonly<Record<string, readonly Candidate[]>> = {
   researcher: RESEARCH,
   explore: RESEARCH,
