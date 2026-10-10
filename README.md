@@ -21,8 +21,6 @@ Every other agent keeps the model the parent chose. Routes are defined in
 
 - A route missing from the model catalog, or lacking the effort variant, is
   skipped. If no route is left, the dispatch fails instead of using another model.
-- A route uses the `fast-<effort>` variant when the catalog offers it and the
-  policy prefers fast mode. No current route prefers it.
 
 ## Fallback
 

@@ -6,11 +6,10 @@ import { startFixture, type Fixture, type Script } from "./fixture.ts"
 const REPO = resolve(import.meta.dir, "../..")
 const PASSWORD = "fixture-password"
 const EFFORTS = ["low", "medium", "high"].map((id) => ({ id, settings: { reasoningEffort: id } }))
-const FAST = [{ id: "fast-low", settings: { reasoningEffort: "low" }, body: { service_tier: "priority" } }]
 
 export const ROUTE_PROVIDERS = {
   openai: { "gpt-6.1-sol": EFFORTS },
-  cli_proxy_openai: { "gpt-6.1-sol": [...EFFORTS, ...FAST] },
+  cli_proxy_openai: { "gpt-6.1-sol": EFFORTS },
   cli_proxy: { "cpa-claude-sonnet-5-5": EFFORTS, "cpa-claude-opus-5-5": EFFORTS },
 } as const
 

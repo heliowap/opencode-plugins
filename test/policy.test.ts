@@ -3,11 +3,7 @@ import { resolve, type CatalogModel } from "../src/policy.ts"
 
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 const DIRECT: CatalogModel = { providerID: "openai", id: "gpt-6.1-sol", variants: EFFORTS }
-const PROXY_SOL: CatalogModel = {
-  providerID: "cli_proxy_openai",
-  id: "gpt-6.1-sol",
-  variants: [...EFFORTS, "fast", "fast-low", "fast-medium"],
-}
+const PROXY_SOL: CatalogModel = { providerID: "cli_proxy_openai", id: "gpt-6.1-sol", variants: EFFORTS }
 const OPUS: CatalogModel = { providerID: "cli_proxy", id: "cpa-claude-opus-5-5", variants: EFFORTS }
 const SONNET: CatalogModel = { providerID: "cli_proxy", id: "cpa-claude-sonnet-5-5", variants: EFFORTS }
 const FULL = [DIRECT, PROXY_SOL, OPUS, SONNET]
@@ -32,12 +28,6 @@ describe("planner policy", () => {
       skipped: [],
     })
   })
-
-  test("a planner does not switch to fast mode even when Opus offers it", () => {
-    const fastOpus = { ...OPUS, variants: [...EFFORTS, "fast-high"] }
-
-    expect(resolve("planner", [fastOpus])).toMatchObject({ routes: [{ variant: "high" }] })
-  })
 })
 
 describe("research policy", () => {
@@ -58,13 +48,6 @@ describe("research policy", () => {
       ],
       skipped: [],
     })
-  })
-
-  test("does not switch to fast mode even when the routes offer it", () => {
-    const fast = [...EFFORTS, "fast-low", "fast-medium"]
-    const resolution = resolve("researcher", [{ ...SONNET, variants: fast }, { ...OPUS, variants: fast }])
-
-    expect(resolution).toMatchObject({ routes: [{ variant: "medium" }, { variant: "low" }] })
   })
 
   test("routes missing from the catalog or lacking the effort variant are skipped with a reason", () => {

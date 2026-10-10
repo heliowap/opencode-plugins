@@ -23,25 +23,19 @@ interface Candidate {
   readonly providerID: string
   readonly model: string
   readonly effort: string
-  readonly preferFast: boolean
 }
 
 const RESEARCH: readonly Candidate[] = [
-  { providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", effort: "medium", preferFast: false },
-  { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "low", preferFast: false },
+  { providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", effort: "medium" },
+  { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "low" },
 ]
 
 // Research, explore and planner rules were approved directly by the user.
 const POLICIES: Readonly<Record<string, readonly Candidate[]>> = {
   researcher: RESEARCH,
   explore: RESEARCH,
-  planner: [{ providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "high", preferFast: false }],
+  planner: [{ providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "high" }],
 }
-
-const variantFor = (candidate: Candidate, entry: CatalogModel) =>
-  [...(candidate.preferFast ? [`fast-${candidate.effort}`] : []), candidate.effort].find((variant) =>
-    entry.variants.includes(variant),
-  )
 
 export const routeKey = (route: { readonly providerID: string; readonly model: string }) =>
   `${route.providerID}/${route.model}`
@@ -62,12 +56,11 @@ export const resolve = (
       skipped.push({ route, reason: "not in the available model catalog" })
       continue
     }
-    const variant = variantFor(candidate, entry)
-    if (!variant) {
+    if (!entry.variants.includes(candidate.effort)) {
       skipped.push({ route, reason: `variant ${candidate.effort} is not available` })
       continue
     }
-    routes.push({ providerID: candidate.providerID, model: candidate.model, variant })
+    routes.push({ providerID: candidate.providerID, model: candidate.model, variant: candidate.effort })
   }
   const healthy = routes.filter((route) => !unhealthy.has(routeKey(route)))
   const failing = routes.filter((route) => unhealthy.has(routeKey(route)))

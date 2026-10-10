@@ -34,7 +34,7 @@ export const routeOf = (call: Call) => `${call.provider}/${call.request.model}`
 export const childRoutes = (calls: Call[]) =>
   calls
     .filter((call) => call.provider !== "fixture")
-    .map((call) => `${routeOf(call)}#${call.request.reasoning_effort ?? ""}${call.request.service_tier === "priority" ? "+fast" : ""}`)
+    .map((call) => `${routeOf(call)}#${call.request.reasoning_effort ?? ""}`)
 
 export const text = (message: ChatMessage) =>
   typeof message.content === "string"
