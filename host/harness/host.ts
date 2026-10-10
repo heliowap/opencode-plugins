@@ -20,6 +20,8 @@ export interface HostOptions {
   readonly omit?: readonly string[]
   readonly extraPlugins?: readonly string[]
   readonly configFiles?: Readonly<Record<string, string>>
+  readonly projectFiles?: Readonly<Record<string, string>>
+  readonly permissions?: (configDir: string) => ReadonlyArray<{ readonly action: string; readonly resource: string; readonly effect: string }>
 }
 
 export interface Session {
@@ -78,14 +80,16 @@ export class Host {
           implementer: { mode: "subagent", description: "Fixture implementer" },
           planner: { mode: "subagent", description: "Fixture planner", model: "cli_proxy/cpa-claude-opus-5-5#medium" },
         },
-        permissions: [{ action: "*", resource: "*", effect: "allow" }],
+        permissions: [{ action: "*", resource: "*", effect: "allow" }, ...(options.permissions?.(config) ?? [])],
       }),
     )
     await symlink(options.pluginDir ?? join(REPO, "src"), join(config, "plugins", "model-policy"))
     for (const plugin of options.extraPlugins ?? []) await symlink(plugin, join(config, "plugins", basename(plugin)))
-    for (const [path, content] of Object.entries(options.configFiles ?? {})) {
-      await mkdir(dirname(join(config, path)), { recursive: true })
-      await writeFile(join(config, path), content)
+    for (const [base, files] of [[config, options.configFiles], [project, options.projectFiles]] as const) {
+      for (const [path, content] of Object.entries(files ?? {})) {
+        await mkdir(dirname(join(base, path)), { recursive: true })
+        await writeFile(join(base, path), content)
+      }
     }
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
@@ -155,11 +159,15 @@ export class Host {
     return text ? JSON.parse(text) : undefined
   }
 
-  async session(agent = "build"): Promise<Session> {
+  get configDir() {
+    return join(this.root, "config", "opencode")
+  }
+
+  async session(agent = "build", directory = this.project): Promise<Session> {
     const created = (await this.json("POST", "/api/session", {
       agent,
       model: { providerID: "fixture", id: "test" },
-      location: { directory: this.project },
+      location: { directory },
     })) as { id?: string; data?: { id: string } }
     return { id: created.id ?? created.data!.id }
   }
