@@ -2,12 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { FAILED, redispatching, toolResults, type Call, type Reply } from "./harness/fixture.ts"
+import { childRoutes, FAILED, OPUS, redispatching, routeOf, SONNET, toolResults, type Call, type Reply } from "./harness/fixture.ts"
 import { Host, type HostOptions } from "./harness/host.ts"
 
 const TIMEOUT = 120_000
-const SONNET = "cli_proxy/cpa-claude-sonnet-5-5"
-const OPUS = "cli_proxy/cpa-claude-opus-5-5"
 let host: Host | undefined
 
 afterEach(async () => {
@@ -37,18 +35,10 @@ const run = async (options: HostOptions) => {
   return { host, session }
 }
 
-const childRoutes = (calls: Call[]) =>
-  calls
-    .filter((call) => call.provider !== "fixture")
-    .map(
-      (call) =>
-        `${call.provider}/${call.request.model}#${call.request.reasoning_effort ?? ""}${call.request.service_tier === "priority" ? "+fast" : ""}`,
-    )
-
 const failing =
   (routes: Record<string, number>): ((call: Call) => Reply) =>
   (call) => {
-    const route = `${call.provider}/${call.request.model}`
+    const route = routeOf(call)
     const status = routes[route]
     return status ? { status, error: `fixture ${status} from ${route}` } : { text: `child answer from ${route}` }
   }
@@ -242,7 +232,7 @@ describe("explore and planner dispatch", () => {
     async () => {
       const { host } = await run({ script: dispatch({ agent: "planner", model: "cli_proxy_openai/gpt-6.1-sol#high" }) })
 
-      expect(childRoutes(host.fixture.agentCalls())).toEqual(["cli_proxy/cpa-claude-opus-5-5#high"])
+      expect(childRoutes(host.fixture.agentCalls())).toEqual([`${OPUS}#high`])
     },
     TIMEOUT,
   )
@@ -252,9 +242,9 @@ describe("roles without an approved policy", () => {
   test(
     "an implementer keeps the model the parent chose",
     async () => {
-      const { host } = await run({ script: dispatch({ agent: "implementer", model: "cli_proxy/cpa-claude-opus-5-5#high" }) })
+      const { host } = await run({ script: dispatch({ agent: "implementer", model: `${OPUS}#high` }) })
 
-      expect(childRoutes(host.fixture.agentCalls())).toEqual(["cli_proxy/cpa-claude-opus-5-5#high"])
+      expect(childRoutes(host.fixture.agentCalls())).toEqual([`${OPUS}#high`])
     },
     TIMEOUT,
   )

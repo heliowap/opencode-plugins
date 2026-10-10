@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { redispatching, text, toolResults, type Call, type Reply } from "./harness/fixture.ts"
+import { OPUS, redispatching, routeOf, SONNET, text, toolResults, type Call, type Reply } from "./harness/fixture.ts"
 import { Host } from "./harness/host.ts"
-
-const SONNET = "cli_proxy/cpa-claude-sonnet-5-5"
-const OPUS = "cli_proxy/cpa-claude-opus-5-5"
 
 let host: Host | undefined
 
@@ -33,8 +30,6 @@ const parent =
     if (call.provider !== "fixture") return child(call)
     return toolResults(call.request).length === 0 ? first : { text: "parent done" }
   }
-
-const routeOf = (call: Call) => `${call.provider}/${call.request.model}`
 
 const answer = (call: Call): Reply => ({ text: `answer ${caseOf(call)} from ${routeOf(call)}` })
 

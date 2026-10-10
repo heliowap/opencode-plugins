@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { text, toolResults, type Call, type Reply } from "./harness/fixture.ts"
+import { childRoutes, OPUS, SONNET, text, toolResults, type Call, type Reply } from "./harness/fixture.ts"
 import { Host } from "./harness/host.ts"
 
 const TIMEOUT = 120_000
@@ -10,7 +10,7 @@ const SKILL_PATH = join(homedir(), ".agents", "skills", "code-review", "SKILL.md
 const HAS_SKILL = existsSync(SKILL_PATH)
 const CODE_REVIEW = HAS_SKILL ? readFileSync(SKILL_PATH, "utf8") : ""
 const SKILL_FILES = { "skills/code-review/SKILL.md": CODE_REVIEW }
-const USER_MODEL = "cli_proxy/cpa-claude-opus-5-5#high"
+const USER_MODEL = `${OPUS}#high`
 const CHILD_MARKER = "You are a subagent spawned by another session."
 
 let host: Host | undefined
@@ -19,11 +19,6 @@ afterEach(async () => {
   await host?.stop()
   host = undefined
 })
-
-const childRoutes = (calls: Call[]) =>
-  calls
-    .filter((call) => call.provider !== "fixture")
-    .map((call) => `${call.provider}/${call.request.model}#${call.request.reasoning_effort ?? ""}`)
 
 const isChild = (call: Call) => call.request.messages.some((message) => message.role === "user" && text(message).includes(CHILD_MARKER))
 
@@ -53,7 +48,7 @@ describe.skipIf(!HAS_SKILL)("code-review skill activation", () => {
 
       const parentCalls = host.fixture.calls.filter((call) => call.provider === "fixture")
       expect(parentCalls.some((call) => toolResults(call.request).some((result) => result.includes("Two-axis review")))).toBe(true)
-      expect(childRoutes(host.fixture.agentCalls())).toEqual(["cli_proxy/cpa-claude-sonnet-5-5#medium"])
+      expect(childRoutes(host.fixture.agentCalls())).toEqual([`${SONNET}#medium`])
     },
     TIMEOUT,
   )
@@ -63,7 +58,7 @@ describe.skipIf(!HAS_SKILL)("code-review skill activation", () => {
     async () => {
       const host = await runPrompt(loadSkillThenDispatch({ agent: "general", model: USER_MODEL }))
 
-      expect(childRoutes(host.fixture.agentCalls())).toEqual(["cli_proxy/cpa-claude-opus-5-5#high"])
+      expect(childRoutes(host.fixture.agentCalls())).toEqual([`${OPUS}#high`])
     },
     TIMEOUT,
   )
@@ -85,7 +80,7 @@ describe.skipIf(!HAS_SKILL)("commands that run as a subagent", () => {
       await host.until(() => host!.fixture.agentCalls().some((call) => call.provider !== "fixture"))
       await host.settle(session)
 
-      expect(childRoutes(host.fixture.agentCalls())).toEqual(["cli_proxy/cpa-claude-opus-5-5#high"])
+      expect(childRoutes(host.fixture.agentCalls())).toEqual([`${OPUS}#high`])
     },
     TIMEOUT,
   )

@@ -26,6 +26,16 @@ export type Reply =
 
 export type Script = (call: Call) => Reply
 
+export const SONNET = "cli_proxy/cpa-claude-sonnet-5-5"
+export const OPUS = "cli_proxy/cpa-claude-opus-5-5"
+
+export const routeOf = (call: Call) => `${call.provider}/${call.request.model}`
+
+export const childRoutes = (calls: Call[]) =>
+  calls
+    .filter((call) => call.provider !== "fixture")
+    .map((call) => `${routeOf(call)}#${call.request.reasoning_effort ?? ""}${call.request.service_tier === "priority" ? "+fast" : ""}`)
+
 export const text = (message: ChatMessage) =>
   typeof message.content === "string"
     ? message.content
