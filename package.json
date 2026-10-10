@@ -1,0 +1,21 @@
+{
+  "name": "opencode-v2-model-routes",
+  "version": "0.1.0",
+  "description": "Restricts OpenAI and Anthropic models in the OpenCode catalog to approved providers",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.0.24"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@typescript/native-preview": "^7.0.0-dev"
+  },
+  "license": "MIT"
+}
