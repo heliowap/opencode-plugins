@@ -106,7 +106,7 @@ const gitProfiles = new Map<string, { flags: ReadonlySet<string>; numbers: Reado
   ]), numbers: new Set() }],
 ])
 
-const readGit = (args: readonly string[]): boolean => {
+const readGit = (args: Stage): number | undefined => {
   let index = 0
   let directory = false
   let noPager = false
@@ -117,7 +117,7 @@ const readGit = (args: readonly string[]): boolean => {
     } else if (args[index] === "-C" && !directory) {
       directory = true
       const path = args[++index]
-      if (!path || path.startsWith("-")) return false
+      if (!path || path.startsWith("-")) return
       index++
     } else {
       break
@@ -125,7 +125,7 @@ const readGit = (args: readonly string[]): boolean => {
   }
   const subcommand = args[index++]
   const profile = gitProfiles.get(subcommand ?? "")
-  if (!profile) return false
+  if (!profile) return
   let options = true
   let noIndex = false
   let operands = 0
@@ -136,18 +136,18 @@ const readGit = (args: readonly string[]): boolean => {
     } else if (options && profile.flags.has(arg)) {
       if (arg === "--no-index") noIndex = true
     } else if (options && profile.numbers.has(arg)) {
-      if (arg === "-U" || arg === "--unified") return false
-      if (!/^[0-9]+$/.test(args[++index] ?? "")) return false
+      if (arg === "-U" || arg === "--unified") return
+      if (!/^[0-9]+$/.test(args[++index] ?? "")) return
     } else if (options && arg.startsWith("-")) {
       if (profile.numbers.has("-U") && /^-U[0-9]+$/.test(arg)) continue
       const equal = arg.indexOf("=")
-      if (!arg.startsWith("--") || equal < 0 || !profile.numbers.has(arg.slice(0, equal)) || !/^[0-9]+$/.test(arg.slice(equal + 1))) return false
+      if (!arg.startsWith("--") || equal < 0 || !profile.numbers.has(arg.slice(0, equal)) || !/^[0-9]+$/.test(arg.slice(equal + 1))) return
     } else {
-      if (!arg) return false
+      if (!arg) return
       operands++
     }
   }
-  return !noIndex || operands === 2
+  return !noIndex || operands === 2 ? operands : undefined
 }
 
 const readers = new Map<string, { source: boolean; filter: boolean; read: (args: Stage) => number | undefined }>([
@@ -157,7 +157,7 @@ const readers = new Map<string, { source: boolean; filter: boolean; read: (args:
   ["wc", { source: true, filter: true, read: (args) => readFiles(args, /^-[clmwL]+$/) }],
   ["grep", { source: true, filter: true, read: readGrep }],
   ["sed", { source: true, filter: true, read: readSed }],
-  ["git", { source: true, filter: false, read: (args) => readGit(args) ? 1 : undefined }],
+  ["git", { source: true, filter: false, read: readGit }],
   ["sort", { source: false, filter: true, read: (args) => readFiles(args, /^-[fnru]+$/) }],
 ])
 

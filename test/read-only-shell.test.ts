@@ -93,7 +93,8 @@ test.each([
   "cat AGENTS.md | sort --compress-program=sh", "cat AGENTS.md | sort AGENTS.md", "sort -u AGENTS.md",
   "cat AGENTS.md | git diff", "cat AGENTS.md | sed -n 'w AGENTS.md'", "cat AGENTS.md | uniq - AGENTS.md",
   "cat AGENTS.md | xargs rm", "cat AGENTS.md | sh", "head -n 1 | cat AGENTS.md",
-  "cat AGENTS.md | head -n 1 > AGENTS.md",
+  "cat AGENTS.md | head -n 1 > AGENTS.md", "git status | grep AGENTS.md",
+  "git log --oneline | grep AGENTS.md", "git -C AGENTS.md status --short",
 ])("rejects unsupported or unsafe syntax %j", (command) => {
   expect(isSupportedReadCommand(command)).toBe(false)
 })
