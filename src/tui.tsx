@@ -1,19 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { Plugin } from "@opencode/plugin/tui"
 import { createSignal, Show } from "solid-js"
-import { label, reading, record, type Meter, type MeterEvent, type Reading } from "./meter.ts"
-
-const EVENTS = [
-  "session.step.started",
-  "session.text.delta",
-  "session.reasoning.delta",
-  "session.tool.input.delta",
-  "session.step.streamed",
-  "session.step.ended",
-  "session.step.failed",
-  "session.execution.interrupted",
-  "session.execution.failed",
-] as const satisfies ReadonlyArray<MeterEvent["type"]>
+import { label, METER_EVENTS, reading, record, type Meter, type Reading } from "./meter.ts"
 
 const TICK_MS = 250
 
@@ -23,10 +11,11 @@ export default Plugin.define({
     const [meter, setMeter] = createSignal<Meter>({})
     const [now, setNow] = createSignal(Date.now())
 
-    const stops = EVENTS.map((type) =>
+    const stops = METER_EVENTS.map((type) =>
       context.data.on(type, (event) => {
-        setMeter((current) => record(current, event, Date.now()))
-        setNow(Date.now())
+        const at = Date.now()
+        setMeter((current) => record(current, event, at))
+        setNow(at)
       }),
     )
     const timer = setInterval(() => setNow(Date.now()), TICK_MS)

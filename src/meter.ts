@@ -10,6 +10,22 @@ export type MeterEvent =
     }
   | { type: "session.step.ended"; data: SessionData & { tokens: { output: number; reasoning: number } } }
 
+export const METER_EVENTS = [
+  "session.step.started",
+  "session.text.delta",
+  "session.reasoning.delta",
+  "session.tool.input.delta",
+  "session.step.streamed",
+  "session.step.ended",
+  "session.step.failed",
+  "session.execution.interrupted",
+  "session.execution.failed",
+] as const satisfies ReadonlyArray<MeterEvent["type"]>
+
+// Fails to compile when MeterEvent gains a type that METER_EVENTS does not subscribe to.
+const subscribesToEveryEvent: Exclude<MeterEvent["type"], (typeof METER_EVENTS)[number]> extends never ? true : never = true
+void subscribesToEveryEvent
+
 type Gauge = {
   startedAt?: number
   firstDeltaAt?: number
@@ -29,13 +45,13 @@ const MIN_LIVE_SECONDS = 0.5
 export function record(meter: Meter, event: MeterEvent, now: number): Meter {
   const sessionID = event.data.sessionID
   const gauge = meter[sessionID] ?? { chars: 0 }
-  return { ...meter, [sessionID]: next(gauge, event, now) }
+  return { ...meter, [sessionID]: advance(gauge, event, now) }
 }
 
-function next(gauge: Gauge, event: MeterEvent, now: number): Gauge {
+function advance(gauge: Gauge, event: MeterEvent, now: number): Gauge {
   switch (event.type) {
     case "session.step.started":
-      return { startedAt: event.data.started, chars: 0, final: gauge.final }
+      return { ...idle(gauge.final), startedAt: event.data.started }
     case "session.text.delta":
     case "session.reasoning.delta":
     case "session.tool.input.delta":
@@ -43,16 +59,22 @@ function next(gauge: Gauge, event: MeterEvent, now: number): Gauge {
     case "session.step.streamed":
       return { ...gauge, streamedAt: event.created }
     case "session.step.ended": {
-      // Same formula as OpenCode's built-in footer: server dispatch time to end of stream.
-      if (gauge.startedAt === undefined || gauge.streamedAt === undefined) return gauge
+      // Same formula and guards as OpenCode's built-in footer: server dispatch time to end of stream.
+      if (gauge.startedAt === undefined || gauge.streamedAt === undefined) return idle(gauge.final)
       const tokens = event.data.tokens.output + event.data.tokens.reasoning
-      return { chars: 0, final: tokens / ((gauge.streamedAt - gauge.startedAt) / 1000) }
+      const seconds = (gauge.streamedAt - gauge.startedAt) / 1000
+      if (tokens <= 0 || seconds <= 0) return idle(gauge.final)
+      return idle(tokens / seconds)
     }
     case "session.step.failed":
     case "session.execution.interrupted":
     case "session.execution.failed":
-      return { chars: 0, final: gauge.final }
+      return idle(gauge.final)
   }
+}
+
+function idle(final: number | undefined): Gauge {
+  return { chars: 0, final }
 }
 
 export function reading(meter: Meter, sessionID: string, now: number): Reading | undefined {
@@ -66,7 +88,7 @@ export function reading(meter: Meter, sessionID: string, now: number): Reading |
   return { tps: gauge.final, live: false }
 }
 
-export function label(reading: Reading) {
-  if (reading.live) return `~${Math.round(reading.tps)} tok/s`
-  return `${reading.tps.toFixed(1)} tok/s`
+export function label(value: Reading) {
+  if (value.live) return `~${Math.round(value.tps)} tok/s`
+  return `${value.tps.toFixed(1)} tok/s`
 }
