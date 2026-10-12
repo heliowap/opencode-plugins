@@ -27,5 +27,6 @@
 Unit tests cannot see the TUI. After changing `src/tui.tsx`:
 
 1. In a temporary git repository with one commit, write an `opencode.jsonc` whose `plugins` lists this directory.
-2. Start `opencode --standalone` inside `tmux` and send a prompt that produces a few hundred words.
-3. Read the footer with `tmux capture-pane -p`. While streaming it shows `~N tok/s`; after the step it shows the same `N.N tok/s` as the assistant footer.
+2. If your global config also lists the published plugin, OpenCode loads that copy and marks this directory's copy as failed in `/plugins`. Point `XDG_CONFIG_HOME` at a scratch copy of your config without that entry, and confirm `/plugins` shows `tps.meter` as `local`.
+3. Start `opencode --standalone` inside `tmux` and send a prompt that produces a few hundred words, then one that runs two tool calls before answering.
+4. Read the footer with `tmux capture-pane -p`. While streaming it shows `~N tok/s`; when the turn ends it shows the same `N.N tok/s` as the assistant footer.

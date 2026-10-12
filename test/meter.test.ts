@@ -51,14 +51,17 @@ describe("reading", () => {
     expect(reading(meter, session, 9000)).toBeUndefined()
   })
 
-  test("keeps the previous exact value when a step reports no tokens or no stream time", () => {
+  test("keeps the previous exact value when an execution reports no tokens or no stream time", () => {
     const meter = run([
+      [1000, { type: "session.execution.started", data: { sessionID: session } }],
       [1000, { type: "session.step.started", data: { sessionID: session, started: 1000 } }],
       [3000, { type: "session.step.streamed", created: 3000, data: { sessionID: session } }],
       [3100, { type: "session.step.ended", data: { sessionID: session, tokens: { output: 60, reasoning: 0 } } }],
+      [4000, { type: "session.execution.started", data: { sessionID: session } }],
       [4000, { type: "session.step.started", data: { sessionID: session, started: 4000 } }],
       [4000, { type: "session.step.streamed", created: 4000, data: { sessionID: session } }],
       [4100, { type: "session.step.ended", data: { sessionID: session, tokens: { output: 60, reasoning: 0 } } }],
+      [5000, { type: "session.execution.started", data: { sessionID: session } }],
       [5000, { type: "session.step.started", data: { sessionID: session, started: 5000 } }],
       [6000, { type: "session.step.streamed", created: 6000, data: { sessionID: session } }],
       [6100, { type: "session.step.ended", data: { sessionID: session, tokens: { output: 0, reasoning: 0 } } }],
@@ -74,6 +77,38 @@ describe("reading", () => {
       [3100, { type: "session.step.ended", data: { sessionID: session, tokens: { output: 50, reasoning: 10 } } }],
     ])
     expect(reading(meter, session, 9000)).toEqual({ tps: 20, live: false })
+  })
+})
+
+describe("multi-step turns", () => {
+  test("averages every step since the execution started, like the built-in footer", () => {
+    const meter = run([
+      [1, { type: "session.execution.started", data: { sessionID: session } }],
+      [2, { type: "session.step.started", data: { sessionID: session, started: 1791766947237 } }],
+      [3, { type: "session.step.streamed", created: 1791766948770, data: { sessionID: session } }],
+      [4, { type: "session.step.ended", data: { sessionID: session, tokens: { output: 60, reasoning: 0 } } }],
+      [5, { type: "session.step.started", data: { sessionID: session, started: 1791766948809 } }],
+      [6, { type: "session.step.streamed", created: 1791766949895, data: { sessionID: session } }],
+      [7, { type: "session.step.ended", data: { sessionID: session, tokens: { output: 64, reasoning: 0 } } }],
+      [8, { type: "session.step.started", data: { sessionID: session, started: 1791766949917 } }],
+      [9, { type: "session.step.streamed", created: 1791766953563, data: { sessionID: session } }],
+      [10, { type: "session.step.ended", data: { sessionID: session, tokens: { output: 288, reasoning: 0 } } }],
+    ])
+    expect(reading(meter, session, 11)?.tps.toFixed(1)).toBe("65.8")
+  })
+
+  test("starts a new average when the next execution starts", () => {
+    const meter = run([
+      [1000, { type: "session.execution.started", data: { sessionID: session } }],
+      [1000, { type: "session.step.started", data: { sessionID: session, started: 1000 } }],
+      [2000, { type: "session.step.streamed", created: 2000, data: { sessionID: session } }],
+      [2000, { type: "session.step.ended", data: { sessionID: session, tokens: { output: 100, reasoning: 0 } } }],
+      [3000, { type: "session.execution.started", data: { sessionID: session } }],
+      [3000, { type: "session.step.started", data: { sessionID: session, started: 3000 } }],
+      [5000, { type: "session.step.streamed", created: 5000, data: { sessionID: session } }],
+      [5000, { type: "session.step.ended", data: { sessionID: session, tokens: { output: 20, reasoning: 0 } } }],
+    ])
+    expect(reading(meter, session, 6000)).toEqual({ tps: 10, live: false })
   })
 })
 
