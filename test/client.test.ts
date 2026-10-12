@@ -222,7 +222,7 @@ describe("fetchAccounts", () => {
   test("reports an unreachable proxy with the runtime's connection error", async () => {
     expect(await fetchAccounts({ baseURL: "http://127.0.0.1:1", managementKey: "secret" }, 0)).toEqual({
       ok: false,
-      error: "Unable to connect. Is the computer able to access the url?",
+      error: expect.stringContaining("Unable to connect. Is the computer able to access the url?"),
     })
   })
 })

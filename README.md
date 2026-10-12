@@ -3,7 +3,7 @@
 > [!NOTE]
 > This is a community plugin. It is not built by the OpenCode team or the CLIProxyAPI team and is not affiliated with either.
 
-Shows the quota of your [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) accounts and native OpenAI OAuth connection inside the OpenCode 2 terminal UI.
+Shows the quota of your [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) accounts and native OpenCode connections inside the OpenCode 2 terminal UI.
 
 - The prompt footer shows how much quota is left for the selected model, such as `5h 58% · wk 82% left`.
 - The session sidebar lists every account for that provider, with a bar of the remaining quota and the time until each window resets.
@@ -19,10 +19,13 @@ Percentages are the quota left, as in the CLIProxyAPI Management Center. A windo
 | Claude | 5 hours, 7 days, and 7-day Fable | Anthropic `api/oauth/usage` |
 | Devin | daily and weekly | Codeium `GetUserStatus` |
 | Antigravity | 5 hours and weekly, per model group | Google `retrieveUserQuotaSummary` |
+| OpenCode Go | 5 hours, weekly, and monthly | `opencode.ai/zen/go/v1/usage` |
 
 Native OpenAI OAuth works with the **Codex browser (legacy)** and **Codex device code (legacy)** connections in OpenCode. It reads the active account directly, without CLIProxyAPI or a management key. Some plans have only a weekly window; the plugin shows only the windows the account reports. Native quota and proxy quota stay separate, even when both serve GPT models.
 
 The newer **Sign in with ChatGPT** token-sharing connection has no documented quota endpoint. For that connection, `/quota` and the sidebar point to [ChatGPT usage settings](https://chatgpt.com/settings/usage) instead of showing Codex quota. API-key connections show no native subscription quota.
+
+An **OpenCode Go** connection reads its quota with the saved API key. It reports 5-hour, weekly, and monthly windows as consumed usage. Its usage route exists in the OpenCode source but is not part of the documented public API, so it may change without notice.
 
 The Claude Fable window limits only Fable models, so the footer shows it only when a Fable model is selected. The sidebar always lists it. Other providers show nothing.
 
@@ -38,7 +41,7 @@ Requires OpenCode 2. CLIProxyAPI quota additionally requires a running proxy wit
 opencode plugin add github:heliowap/opencode-v2-cliproxy-quota
 ```
 
-For native OpenAI OAuth, connect OpenAI in OpenCode; no additional configuration is needed. Its credentials are resolved and refreshed by the OpenCode server and never sent to the terminal UI.
+For native quota, connect the OpenAI or OpenCode Go provider in OpenCode; no additional configuration is needed. The credentials are resolved and refreshed by the OpenCode server and never sent to the terminal UI.
 
 For CLIProxyAPI, export your management key in the shell where you start `opencode`, for example in `~/.zshrc`:
 
@@ -88,7 +91,7 @@ Pass options with the object form in `opencode.jsonc`. Prefer the environment va
 
 ## How it works
 
-For native OpenAI OAuth, a server-side plugin method resolves the active OpenAI connection through OpenCode's integration API and calls ChatGPT `wham/usage`. Only quota data is returned to the terminal. The plugin refreshes when the active credential changes, as well as on the regular refresh interval and after a finished turn.
+For native connections, a server-side plugin method resolves each active connection through OpenCode's integration API and calls its quota endpoint: ChatGPT `wham/usage` for OpenAI OAuth, `opencode.ai/zen/go/v1/usage` for an OpenCode Go key. Only quota data is returned to the terminal. The plugin refreshes when the active credential changes, as well as on the regular refresh interval and after a finished turn.
 
 For proxy accounts, the terminal plugin calls `GET /v8/management/credentials` on CLIProxyAPI to list the accounts.
 

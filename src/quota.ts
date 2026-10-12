@@ -1,4 +1,4 @@
-export type WindowKind = "5h" | "day" | "week" | "fable"
+export type WindowKind = "5h" | "day" | "week" | "month" | "fable"
 
 export type Window = {
   readonly kind: WindowKind
@@ -22,11 +22,37 @@ export type Account = {
   readonly windows: readonly Window[]
 }
 
+export type QuotaResult = { readonly ok: true; readonly accounts: Account[] } | { readonly ok: false; readonly error: string }
+
+// A native source reads quota straight from the provider through an OpenCode integration, without CLIProxyAPI.
+// Its NATIVE_SOURCES record key is the integration ID, so the key never diverges from a field on the entry.
+export type NativeSource = {
+  readonly provider: string
+  readonly name: string
+  readonly method: "oauth" | "key"
+  readonly plan: (credential: NativeCredential) => NativePlan
+  readonly parse: (body: unknown) => Window[]
+}
+
+export type NativeCredential = {
+  readonly type?: string
+  readonly methodID?: string
+  readonly access?: string
+  readonly key?: string
+  readonly metadata?: Readonly<Record<string, unknown>>
+}
+
+export type NativePlan = { readonly kind: "call"; readonly token: string; readonly call: Omit<ApiCall, "auth_index"> } | { readonly kind: "hint"; readonly message: string } | undefined
+
+export type NativeID = keyof typeof NATIVE_SOURCES
+
+export type QuotaSource = "proxy" | NativeID
+
 type Signals = Readonly<Record<string, string>>
 
-const KIND_ORDER: readonly WindowKind[] = ["5h", "day", "week", "fable"]
+const KIND_ORDER: readonly WindowKind[] = ["5h", "day", "week", "month", "fable"]
 
-const KIND_LABEL: Record<WindowKind, string> = { "5h": "5h", day: "day", week: "wk", fable: "fable" }
+const KIND_LABEL: Record<WindowKind, string> = { "5h": "5h", day: "day", week: "wk", month: "mo", fable: "fable" }
 
 // CLIProxyAPI records passive quota signals only for these providers; each reports its windows differently.
 const READERS: Record<string, (signals: Signals, base: number) => Window[]> = {
@@ -209,6 +235,48 @@ export function codexUsageCall(account?: string): Omit<ApiCall, "auth_index"> {
   }
 }
 
+// The $TOKEN$ placeholder exists only for calls routed through the proxy's api-call; native calls carry a real Bearer.
+export function goUsageCall(): Omit<ApiCall, "auth_index"> {
+  return { method: "GET", url: "https://opencode.ai/zen/go/v1/usage", header: {} }
+}
+
+export const NATIVE_SOURCES = {
+  openai: {
+    provider: "codex",
+    name: "OpenAI",
+    method: "oauth",
+    plan: (credential) => {
+      if (credential.type !== "oauth") return undefined
+      // SIWC grants target the public API, not Codex's backend; OpenAI documents usage settings instead of a quota API.
+      if (credential.methodID === "chatgpt-token-sharing")
+        return { kind: "hint", message: "Manage ChatGPT token sharing usage at https://chatgpt.com/settings/usage" }
+      if (!credential.access || !["chatgpt-browser", "chatgpt-headless"].includes(credential.methodID ?? "")) return undefined
+      const account = credential.metadata?.accountID
+      return { kind: "call", token: credential.access, call: codexUsageCall(typeof account === "string" ? account : undefined) }
+    },
+    parse: (body) => parseProbe("codex", body).flatMap((result) => result.windows),
+  },
+  "opencode-go": {
+    provider: "opencode-go",
+    name: "OpenCode Go",
+    method: "key",
+    plan: (credential) => {
+      const key = credential.type === "key" ? text(credential.key) : undefined
+      if (!key) return undefined
+      return { kind: "call", token: key, call: goUsageCall() }
+    },
+    parse: readGoUsage,
+  },
+} satisfies Record<string, NativeSource>
+
+export function nativeSource(integrationID: string): NativeID | undefined {
+  return Object.hasOwn(NATIVE_SOURCES, integrationID) ? (integrationID as NativeID) : undefined
+}
+
+export function nativeError(message: string): Record<NativeID, QuotaResult> {
+  return Object.fromEntries(Object.keys(NATIVE_SOURCES).map((id) => [id, { ok: false as const, error: message }])) as Record<NativeID, QuotaResult>
+}
+
 export function providerForModel(modelID: string) {
   const id = modelID.toLowerCase().replace(/^cpa-/, "")
   const prefix = id.split("/")[0]
@@ -232,10 +300,35 @@ export function isProxyProvider(
 export function quotaSource(
   provider: { readonly id: string; readonly settings?: Readonly<Record<string, unknown>> },
   settings: { readonly baseURL: string; readonly providers: readonly string[] },
-) {
+): QuotaSource | undefined {
   if (isProxyProvider(provider, settings.baseURL, settings.providers)) return "proxy"
-  if (provider.id === "openai") return "openai"
-  return undefined
+  return nativeSource(provider.id)
+}
+
+// A native source stays silent until its first result lands, so the sidebar does not flash an empty Quota
+// section on every refresh tick before the fetch answers.
+export function quotaView(
+  source: QuotaSource | undefined,
+  modelID: string | undefined,
+  proxy: { readonly accounts: readonly Account[]; readonly error: string | undefined },
+  native: Readonly<Partial<Record<NativeID, QuotaResult>>>,
+): { provider: string | undefined; accounts: readonly Account[]; windows: readonly Window[]; error: string | undefined } {
+  if (source === undefined) return { provider: undefined, accounts: [], windows: [], error: proxy.error }
+  if (source === "proxy") {
+    const provider = modelID ? providerForModel(modelID) : undefined
+    return {
+      provider,
+      accounts: provider ? proxy.accounts.filter((account) => account.provider === provider) : [],
+      windows: modelID ? windowsForModel(proxy.accounts, modelID) : [],
+      error: proxy.error,
+    }
+  }
+  const result = native[source]
+  const provider = NATIVE_SOURCES[source].provider
+  const accounts = result?.ok ? result.accounts : []
+  const error = result && !result.ok ? result.error : undefined
+  const live = accounts.length > 0 || error !== undefined
+  return { provider: live ? provider : undefined, accounts, windows: live ? summarize(accounts, provider) : [], error }
 }
 
 export function summarize(accounts: readonly Account[], provider: string) {
@@ -285,6 +378,22 @@ export function bar(usedPercent: number) {
 
 function renew(window: Window, now: number): Window {
   return window.resetAt !== undefined && window.resetAt <= now ? { kind: window.kind, usedPercent: 0, resetAt: undefined } : window
+}
+
+const GO_WINDOWS: Readonly<Record<string, WindowKind>> = { rolling: "5h", weekly: "week", monthly: "month" }
+
+// The route is undocumented; the historical subscription code computed `percent` as consumed usage and set it to
+// 100 once rate-limited, so a limited window without a number is treated as saturated. Other windows drop.
+function readGoUsage(body: unknown): Window[] {
+  const usage = isRecord(body) && isRecord(body.usage) ? body.usage : undefined
+  if (!usage) return []
+  return Object.entries(GO_WINDOWS).flatMap(([name, kind]) => {
+    const window = usage[name]
+    if (!isRecord(window)) return []
+    const usedPercent = number(scalar(window.percent)) ?? (window.status === "rate-limited" ? 100 : undefined)
+    if (usedPercent === undefined) return []
+    return [{ kind, usedPercent, resetAt: isoTime(window.resetsAt) }]
+  })
 }
 
 function readDevinStatus(body: unknown): Window[] {

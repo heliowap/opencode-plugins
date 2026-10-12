@@ -1,8 +1,8 @@
-import { mergeAccounts, parseCredentials, parseProbe, probeTargets, type Account } from "./quota.ts"
+import { mergeAccounts, parseCredentials, parseProbe, probeTargets, type Account, type QuotaResult } from "./quota.ts"
 
 export type Settings = { readonly baseURL: string; readonly managementKey: string }
 
-export type FetchResult = { readonly ok: true; readonly accounts: Account[] } | { readonly ok: false; readonly error: string }
+export type FetchResult = QuotaResult
 
 export type ProbeMemory = Map<string, { readonly attemptedAt: number; readonly live: readonly Account[] }>
 

@@ -5,13 +5,14 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 
 const root = path.resolve(import.meta.dir, "..")
-const modules = ["src/quota.ts", "src/client.ts", "src/openai.ts", "src/rpc.ts"]
+const modules = ["src/quota.ts", "src/client.ts", "src/native.ts", "src/rpc.ts"]
 
 const stubs = await Promise.all(
   modules.map(async (file) => {
     const exported = await import(path.join(root, file))
-    const names = Object.keys(exported).filter((name) => typeof exported[name] === "function")
-    return `mock.module(${JSON.stringify(path.join(root, file))}, () => ({ ${names.map((name) => `${name}: () => undefined`).join(", ")} }))`
+    // Constants like NATIVE_SOURCES get the same undefined treatment: a test reading them must fail, not pass.
+    const names = Object.keys(exported).map((name) => `${name}: ${typeof exported[name] === "function" ? "() => undefined" : "undefined"}`)
+    return `mock.module(${JSON.stringify(path.join(root, file))}, () => ({ ${names.join(", ")} }))`
   }),
 )
 

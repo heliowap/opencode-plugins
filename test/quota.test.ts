@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { bar, footerText, formatReset, isProxyProvider, level, parseCredentials, parseProbe, probeTargets, providerForModel, quotaSource, summarize, windowsForModel } from "../src/quota.ts"
+import { bar, footerText, formatReset, isProxyProvider, level, nativeError, parseCredentials, parseProbe, probeTargets, providerForModel, quotaSource, quotaView, summarize, windowsForModel, type Account } from "../src/quota.ts"
 
 const now = 1791288000_000
 
@@ -264,6 +264,16 @@ describe("footerText", () => {
     ).toBe("5h 58% · wk 82% left")
     expect(footerText([])).toBe("")
   })
+
+  test("orders the OpenCode Go monthly window after the weekly one", () => {
+    expect(
+      footerText([
+        { kind: "month", usedPercent: 26, resetAt: undefined },
+        { kind: "week", usedPercent: 6, resetAt: undefined },
+        { kind: "5h", usedPercent: 2, resetAt: undefined },
+      ]),
+    ).toBe("5h 98% · wk 94% · mo 74% left")
+  })
 })
 
 describe("formatReset", () => {
@@ -339,6 +349,106 @@ describe("quotaSource", () => {
     expect(quotaSource({ id: "openai", settings: { baseURL: "http://localhost:8317/v1" } }, settings)).toBe("proxy")
     expect(quotaSource({ id: "openai" }, { ...settings, providers: ["openai"] })).toBe("proxy")
     expect(quotaSource({ id: "anthropic" }, settings)).toBeUndefined()
+  })
+
+  test("selects the native OpenCode Go provider unless it points at the proxy", () => {
+    const settings = { baseURL: "http://127.0.0.1:8317", providers: [] }
+    expect(quotaSource({ id: "opencode-go", settings: { baseURL: "https://opencode.ai/zen/go/v1" } }, settings)).toBe("opencode-go")
+    expect(quotaSource({ id: "opencode-go", settings: { baseURL: "http://127.0.0.1:8317/v1" } }, settings)).toBe("proxy")
+  })
+})
+
+describe("nativeError", () => {
+  test("marks every native source failed with the same message", () => {
+    expect(nativeError("down")).toEqual({
+      openai: { ok: false, error: "down" },
+      "opencode-go": { ok: false, error: "down" },
+    })
+  })
+})
+
+describe("quotaView", () => {
+  const goAccount: Account = {
+    provider: "opencode-go",
+    label: "Go",
+    authIndex: "opencode-go:go-1",
+    observedAt: 1791288000_000,
+    windows: [
+      { kind: "5h", usedPercent: 2, resetAt: 1791826742000 },
+      { kind: "week", usedPercent: 6, resetAt: 1792368000000 },
+      { kind: "month", usedPercent: 26, resetAt: 1798215240000 },
+    ],
+  }
+  const codexAccount: Account = {
+    provider: "codex",
+    label: "proxy codex",
+    authIndex: "c1",
+    observedAt: undefined,
+    windows: [{ kind: "5h", usedPercent: 50, resetAt: undefined }],
+  }
+  const claudeAccount: Account = {
+    provider: "claude",
+    label: "proxy claude",
+    authIndex: "k1",
+    observedAt: undefined,
+    windows: [
+      { kind: "5h", usedPercent: 34, resetAt: undefined },
+      { kind: "fable", usedPercent: 0, resetAt: undefined },
+    ],
+  }
+  const proxy = { accounts: [codexAccount, claudeAccount], error: "proxy down" }
+
+  test("surfaces proxy errors without a provider when the selected model has no quota source", () => {
+    expect(quotaView(undefined, "claude-sonnet-4-5", proxy, {})).toEqual({ provider: undefined, accounts: [], windows: [], error: "proxy down" })
+    expect(quotaView(undefined, "glm-5.3-flash", proxy, {})).toEqual({ provider: undefined, accounts: [], windows: [], error: "proxy down" })
+  })
+
+  test("shows the proxy accounts serving the selected model", () => {
+    const accounts = [codexAccount, claudeAccount]
+    const empty = { accounts, error: undefined }
+    expect(quotaView("proxy", "claude-fable-5-1", empty, {})).toEqual({
+      provider: "claude",
+      accounts: [claudeAccount],
+      windows: [
+        { kind: "5h", usedPercent: 34, resetAt: undefined },
+        { kind: "fable", usedPercent: 0, resetAt: undefined },
+      ],
+      error: undefined,
+    })
+    expect(quotaView("proxy", "gpt-6.1-sol", empty, {}).accounts).toEqual([codexAccount])
+    expect(quotaView("proxy", "cpa-claude-opus-5-5", empty, {}).windows).toEqual([{ kind: "5h", usedPercent: 34, resetAt: undefined }])
+  })
+
+  test("shows the native provider and its summarized windows once it reports accounts", () => {
+    expect(quotaView("opencode-go", "opencode-go/swe-2", { accounts: [], error: undefined }, { "opencode-go": { ok: true, accounts: [goAccount] } })).toEqual({
+      provider: "opencode-go",
+      accounts: [goAccount],
+      windows: [
+        { kind: "5h", usedPercent: 2, resetAt: 1791826742000 },
+        { kind: "week", usedPercent: 6, resetAt: 1792368000000 },
+        { kind: "month", usedPercent: 26, resetAt: 1798215240000 },
+      ],
+      error: undefined,
+    })
+  })
+
+  test("shows a defined provider with the native error and no accounts", () => {
+    expect(quotaView("opencode-go", "opencode-go/swe-2", { accounts: [], error: undefined }, { "opencode-go": { ok: false, error: "OpenCode Go quota: HTTP 401" } })).toEqual({
+      provider: "opencode-go",
+      accounts: [],
+      windows: [],
+      error: "OpenCode Go quota: HTTP 401",
+    })
+  })
+
+  test("stays silent while a native source has neither accounts nor an error", () => {
+    const native = { openai: { ok: true as const, accounts: [] }, "opencode-go": { ok: true as const, accounts: [] } }
+    expect(quotaView("opencode-go", "opencode-go/swe-2", { accounts: [], error: undefined }, native)).toEqual({
+      provider: undefined,
+      accounts: [],
+      windows: [],
+      error: undefined,
+    })
   })
 })
 
