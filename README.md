@@ -50,11 +50,14 @@ There is no automatic approval based on an agent's answer.
   only, and lasts until your next message in it.
 - **Works with `session.permissions: autoaccept`.** The plugin denies instead
   of asking, so an auto-accepting client cannot approve the edit for you.
-- **Shell reads.** Supported single-command forms include `cat`, `head`, `tail`,
-  `wc`, `grep`, restricted `sed -n` print scripts, and selected Git inspection
-  commands. Literal quoted paths and bare `~/` paths are supported.
-  Unknown commands or options, redirects, pipes, command chains, and command
-  substitutions still need approval when they mention the protected file.
+- **Shell reads.** Supported forms include `cat`, `head`, `tail`, `wc`, `grep`,
+  restricted `sed -n` print scripts, and selected Git inspection commands.
+  Literal quoted paths and bare `~/` paths are supported. A read may pipe into
+  stdin-only filters (`cat`, `head`, `tail`, `wc`, `grep`, `sed -n`,
+  `sort -fnru`), as in `grep -n x AGENTS.md | head -20`.
+  Unknown commands or options, redirects, filters with file arguments, command
+  chains, and command substitutions still need approval when they mention the
+  protected file.
   A recognized read does not override other OpenCode permission rules or
   approve later writes.
 

@@ -15,6 +15,7 @@ test.each([
   "cat agents.MD",
   "cat -- -n AGENTS.md",
   "head -n 10 AGENTS.md",
+  "head -20 AGENTS.md",
   "head -c 0 -- AGENTS.md",
   "tail -n 1 AGENTS.md",
   "tail -c 100 AGENTS.md",
@@ -45,6 +46,12 @@ test.each([
   "git log --max-count=2 -- AGENTS.md",
   "git ls-files --stage -- AGENTS.md",
   "git ls-files --others --exclude-standard -- AGENTS.md",
+  "grep -n staging AGENTS.md | head -20",
+  "cat AGENTS.md | grep -n rules",
+  "git log --oneline -- AGENTS.md | head -n 5",
+  "cat AGENTS.md | sort -u | wc -l",
+  "sed -n '1,20p' AGENTS.md | tail -n 3",
+  "grep -c x 'a | b/AGENTS.md'",
 ])("supports a literal reader %j", (command) => {
   expect(isSupportedReadCommand(command)).toBe(true)
 })
@@ -79,6 +86,14 @@ test.each([
   "cat AGENTS.md*", "cat AGENTS.md?", "cat [A]GENTS.md", "cat {AGENTS.md,notes.md}",
   "cat 'AGENTS.md", 'cat "AGENTS.md', "cat 'AGENTS'.md", "cat AGENTS'.md'", "cat 'AGENTS.md'\"\"",
   "cat AGENTS\\.md", 'cat "AGENTS\\.md"', "cat\vAGENTS.md", "cat AGENTS.md\u00a0",
+  "cat AGENTS.md |", "| head AGENTS.md", "cat AGENTS.md | | head", "cat AGENTS.md || head",
+  "cat AGENTS.md |& head", "cat AGENTS.md|head", "cat AGENTS.md | head AGENTS.md",
+  "cat AGENTS.md | grep x AGENTS.md", "cat AGENTS.md | sort -o AGENTS.md",
+  "cat AGENTS.md | sort -oAGENTS.md", "cat AGENTS.md | sort --output=AGENTS.md",
+  "cat AGENTS.md | sort --compress-program=sh", "cat AGENTS.md | sort AGENTS.md", "sort -u AGENTS.md",
+  "cat AGENTS.md | git diff", "cat AGENTS.md | sed -n 'w AGENTS.md'", "cat AGENTS.md | uniq - AGENTS.md",
+  "cat AGENTS.md | xargs rm", "cat AGENTS.md | sh", "head -n 1 | cat AGENTS.md",
+  "cat AGENTS.md | head -n 1 > AGENTS.md",
 ])("rejects unsupported or unsafe syntax %j", (command) => {
   expect(isSupportedReadCommand(command)).toBe(false)
 })

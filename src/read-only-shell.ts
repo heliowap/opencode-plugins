@@ -1,6 +1,11 @@
-const literalArguments = (command: string): readonly string[] | undefined => {
+type Stage = readonly string[]
+type Pipeline = readonly Stage[]
+
+const literalPipeline = (command: string): Pipeline | undefined => {
   if (command.length > 16_384 || /[\r\n\0]/.test(command)) return
-  const args: string[] = []
+  const stages: string[][] = [[]]
+  let args = stages[0]!
+  let words = 0
   let index = 0
   while (index < command.length) {
     if (command[index] === " " || command[index] === "\t") {
@@ -8,6 +13,7 @@ const literalArguments = (command: string): readonly string[] | undefined => {
       continue
     }
     const start = index
+    if (++words > 256) return
     const quote = command[index]
     let word: string
     if (quote === "'" || quote === '"') {
@@ -20,15 +26,20 @@ const literalArguments = (command: string): readonly string[] | undefined => {
     } else {
       while (index < command.length && command[index] !== " " && command[index] !== "\t") index++
       word = command.slice(start, index)
+      if (word === "|") {
+        if (!args.length) return
+        args = []
+        stages.push(args)
+        continue
+      }
       if (!/^(?:~\/)?[A-Za-z0-9_./,:@%+=-]+$/.test(word) || /^(?:=|[A-Za-z_][A-Za-z0-9_]*=)/.test(word)) return
     }
     args.push(word)
-    if (args.length > 256) return
   }
-  return args.length ? args : undefined
+  return args.length ? stages : undefined
 }
 
-const readFiles = (args: readonly string[], flags: RegExp, counts = false): boolean => {
+const readFiles = (args: Stage, flags: RegExp, counts = false): number | undefined => {
   let paths = 0
   let options = true
   for (let index = 0; index < args.length; index++) {
@@ -36,18 +47,18 @@ const readFiles = (args: readonly string[], flags: RegExp, counts = false): bool
     if (options && arg === "--") {
       options = false
     } else if (options && counts && (arg === "-n" || arg === "-c")) {
-      if (!/^[0-9]+$/.test(args[++index] ?? "")) return false
+      if (!/^[0-9]+$/.test(args[++index] ?? "")) return
     } else if (options && arg.startsWith("-") && arg !== "-") {
-      if (!flags.test(arg)) return false
+      if (!flags.test(arg)) return
     } else {
-      if (!arg) return false
+      if (!arg) return
       paths++
     }
   }
-  return paths > 0
+  return paths
 }
 
-const readGrep = (args: readonly string[]): boolean => {
+const readGrep = (args: Stage): number | undefined => {
   let pattern = false
   let paths = 0
   let options = true
@@ -56,22 +67,22 @@ const readGrep = (args: readonly string[]): boolean => {
     if (options && arg === "--") {
       options = false
     } else if (options && arg === "-e") {
-      if (args[++index] === undefined) return false
+      if (args[++index] === undefined) return
       pattern = true
     } else if (options && arg.startsWith("-") && arg !== "-") {
-      if (!/^-[EFGivnclLhHoqswxaI]+$/.test(arg)) return false
+      if (!/^-[EFGivnclLhHoqswxaI]+$/.test(arg)) return
     } else if (!pattern) {
       pattern = true
     } else {
-      if (!arg) return false
+      if (!arg) return
       paths++
     }
   }
-  return pattern && paths > 0
+  return pattern ? paths : undefined
 }
 
-const readSed = (args: readonly string[]): boolean => {
-  if (args[0] !== "-n" || !/^(?:p|[1-9][0-9]*(?:,[1-9][0-9]*)?p)$/.test(args[1] ?? "")) return false
+const readSed = (args: Stage): number | undefined => {
+  if (args[0] !== "-n" || !/^(?:p|[1-9][0-9]*(?:,[1-9][0-9]*)?p)$/.test(args[1] ?? "")) return
   return readFiles(args.slice(2), /^$/)
 }
 
@@ -139,18 +150,24 @@ const readGit = (args: readonly string[]): boolean => {
   return !noIndex || operands === 2
 }
 
-const readers = new Map<string, (args: readonly string[]) => boolean>([
-  ["cat", (args) => readFiles(args, /^-[benstuvAET]+$/)],
-  ["head", (args) => readFiles(args, /^$/, true)],
-  ["tail", (args) => readFiles(args, /^$/, true)],
-  ["wc", (args) => readFiles(args, /^-[clmwL]+$/)],
-  ["grep", readGrep],
-  ["sed", readSed],
-  ["git", readGit],
+const readers = new Map<string, { source: boolean; filter: boolean; read: (args: Stage) => number | undefined }>([
+  ["cat", { source: true, filter: true, read: (args) => readFiles(args, /^-[benstuvAET]+$/) }],
+  ["head", { source: true, filter: true, read: (args) => readFiles(args, /^-[0-9]+$/, true) }],
+  ["tail", { source: true, filter: true, read: (args) => readFiles(args, /^$/, true) }],
+  ["wc", { source: true, filter: true, read: (args) => readFiles(args, /^-[clmwL]+$/) }],
+  ["grep", { source: true, filter: true, read: readGrep }],
+  ["sed", { source: true, filter: true, read: readSed }],
+  ["git", { source: true, filter: false, read: (args) => readGit(args) ? 1 : undefined }],
+  ["sort", { source: false, filter: true, read: (args) => readFiles(args, /^-[fnru]+$/) }],
 ])
 
 export const isSupportedReadCommand = (command: string): boolean => {
-  const args = literalArguments(command)
-  if (!args) return false
-  return readers.get(args[0]!)?.(args.slice(1)) ?? false
+  const stages = literalPipeline(command)
+  if (!stages) return false
+  return stages.every((args, index) => {
+    const reader = readers.get(args[0]!)
+    if (!reader || !(index === 0 ? reader.source : reader.filter)) return false
+    const paths = reader.read(args.slice(1))
+    return paths !== undefined && (index === 0 ? paths > 0 : paths === 0)
+  })
 }

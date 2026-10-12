@@ -84,6 +84,7 @@ test.each<[string, (dir: string) => string]>([
   ["head", (dir) => `head -n 1 "${dir}/AGENTS.md"`],
   ["tail", (dir) => `tail -n 1 "${dir}/AGENTS.md"`],
   ["grep", (dir) => `grep -n Global "${dir}/AGENTS.md"`],
+  ["grep piped into head", (dir) => `grep -n Global "${dir}/AGENTS.md" | head -n 5`],
   ["git diff", (dir) => `git diff --no-index -- /dev/null "${dir}/AGENTS.md"`],
   ["git diff context", (dir) => `git diff --no-index -U3 -- /dev/null "${dir}/AGENTS.md"`],
 ])("a read-only shell %s returns the protected file without approval", async (_name, command) => {
