@@ -13,6 +13,13 @@ A `model.transform` hook removes every model that matches both conditions:
 Exception: `anthropic/claude-sonnet-5-5` and `anthropic/claude-haiku-5-5` stay
 available through the Anthropic API.
 
+Anthropic API models are user-only. An `execute.before` hook rejects a
+`subagent` call whose `model` starts with `anthropic/`, so only the user selects
+them in `/models`. A subagent dispatched without `model` is not blocked, even
+when it inherits an Anthropic API model from its session. Commands and agent
+defaults that name an Anthropic API model, and background subagents resumed
+after a server restart, are not enforced either.
+
 Models from other vendors, and OpenAI or Anthropic models served by the
 approved providers, are left untouched. The provider list and patterns are
 defined in [`src/index.ts`](src/index.ts).
