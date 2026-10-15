@@ -10,6 +10,9 @@ A `model.transform` hook removes every model that matches both conditions:
 - its ID starts with `openai/` or `anthropic/` (optionally prefixed with `~`),
   or its family starts with `gpt` or `claude`.
 
+Exception: `anthropic/claude-sonnet-5-5` and `anthropic/claude-haiku-5-5` stay
+available through the Anthropic API.
+
 Models from other vendors, and OpenAI or Anthropic models served by the
 approved providers, are left untouched. The provider list and patterns are
 defined in [`src/index.ts`](src/index.ts).
