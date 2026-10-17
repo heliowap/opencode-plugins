@@ -51,11 +51,13 @@ const sees = (expected: readonly string[]) =>
 
 const type = (...keys: string[]) => expect(Bun.spawnSync(["tmux", "send-keys", "-t", terminal!, ...keys]).exitCode).toBe(0)
 
-const shows = (expected: string) =>
+const shows = (expected: string | RegExp) =>
   waitFor(
-    () => badgeLine() === expected,
-    `the line above the input never showed "${expected}".`,
+    () => (typeof expected === "string" ? badgeLine() === expected : expected.test(badgeLine())),
+    `the line above the input never showed ${typeof expected === "string" ? `"${expected}"` : expected}.`,
   )
+
+const running = (usage: string) => new RegExp(`^[◐◓◑◒] goal running · ${usage}$`)
 
 describe.skipIf(!tmux && !process.env.CI)("status above the input in the terminal UI", () => {
   test(
@@ -69,8 +71,17 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       await host.goal(session, "--tokens 50K show me in the bar")
       open(session)
 
-      await shows("◎ goal running · 120 / 50K")
-      await shows("◎ goal running · 240 / 50K")
+      await shows(running("120 / 50K"))
+      const glyphs = new Set<string>()
+      const sampled = Date.now() + 1_500
+      while (Date.now() < sampled) {
+        const glyph = badgeLine().split(" ")[0]!
+        expect(["◐", "◓", "◑", "◒"]).toContain(glyph)
+        glyphs.add(glyph)
+        await Bun.sleep(50)
+      }
+      expect([...glyphs].sort()).toEqual(["◐", "◑", "◒", "◓"])
+      await shows(running("240 / 50K"))
       await host.goal(session, "pause")
       await shows("⏸ goal paused")
       await host.settle(session)

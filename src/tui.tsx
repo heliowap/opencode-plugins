@@ -2,7 +2,7 @@
 import type { TextareaRenderable } from "@opentui/core"
 import { Plugin } from "@opencode/plugin/tui"
 import type { Context } from "@opencode/plugin/tui/context"
-import { editedObjective, goalBadge, objectiveLines, type Tone } from "./badge.ts"
+import { editedObjective, goalBadge, objectiveLines, SPIN_INTERVAL_MS, type Tone } from "./badge.ts"
 import { decodeGoal, type Goal } from "./goal.ts"
 import { GoalRpc } from "./rpc.ts"
 
@@ -73,6 +73,7 @@ export default Plugin.define({
   setup(context) {
     const rpc = context.client.rpc(GoalRpc)
     const [goals, update] = context.storage.memory("goals", { initial: {} as Record<string, Goal | null> })
+    const [spin, advance] = context.storage.memory("spinner", { initial: { frame: 0 } })
     const remember = (sessionID: string, goal: unknown) =>
       update((draft) => {
         draft[sessionID] = decodeGoal(goal) ?? null
@@ -112,8 +113,10 @@ export default Plugin.define({
       append: "session.composer.top",
       render: (slot) => {
         fetchGoal(slot.sessionID)
-        const badge = () =>
-          goalBadge(goalOf(slot.sessionID), context.data.session.status(slot.sessionID) === "running")
+        const badge = () => {
+          const running = context.data.session.status(slot.sessionID) === "running"
+          return goalBadge(goalOf(slot.sessionID), running, running ? spin.frame : 0)
+        }
         return (
           <>
             {badge() ? (
@@ -148,7 +151,14 @@ export default Plugin.define({
       },
     })
 
+    const ticker = setInterval(() => {
+      advance((draft) => {
+        draft.frame += 1
+      })
+    }, SPIN_INTERVAL_MS)
+
     return () => {
+      clearInterval(ticker)
       stopChanged()
       stopEdit()
     }

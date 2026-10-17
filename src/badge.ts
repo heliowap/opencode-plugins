@@ -13,10 +13,14 @@ const usage = (goal: Goal) =>
     ? formatTokens(goal.tokensUsed)
     : `${formatTokens(goal.tokensUsed)} / ${formatTokens(goal.tokenBudget)}`
 
-const badges: Record<Status, (goal: Goal, running: boolean) => Badge | undefined> = {
-  active: (goal, running) =>
+export const SPIN_INTERVAL_MS = 150
+
+const SPINNER = ["◐", "◓", "◑", "◒"]
+
+const badges: Record<Status, (goal: Goal, running: boolean, frame: number) => Badge | undefined> = {
+  active: (goal, running, frame) =>
     running
-      ? { text: `◎ goal running · ${usage(goal)}`, tone: "accent" }
+      ? { text: `${SPINNER[frame % SPINNER.length]!} goal running · ${usage(goal)}`, tone: "accent" }
       : { text: `◎ goal active · ${usage(goal)}`, tone: "muted" },
   paused: () => ({ text: "⏸ goal paused", tone: "warning" }),
   blocked: () => ({ text: "⚠ goal blocked", tone: "error" }),
@@ -24,8 +28,8 @@ const badges: Record<Status, (goal: Goal, running: boolean) => Badge | undefined
   complete: () => undefined,
 }
 
-export const goalBadge = (goal: Goal | undefined, running: boolean): Badge | undefined =>
-  goal && badges[goal.status](goal, running)
+export const goalBadge = (goal: Goal | undefined, running: boolean, frame: number): Badge | undefined =>
+  goal && badges[goal.status](goal, running, frame)
 
 export const editedObjective = (original: string, text: string): string | undefined => {
   const objective = text.trim()

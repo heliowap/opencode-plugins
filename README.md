@@ -46,12 +46,14 @@ In the terminal UI, a line above the input shows the goal of the open session:
 
 | Goal | Line |
 |---|---|
-| Active, turn running | `◎ goal running · 12K / 50K` |
+| Active, turn running | `◐ goal running · 12K / 50K` |
 | Active, between turns | `◎ goal active · 12K / 50K` |
 | Paused | `⏸ goal paused` |
 | Blocked | `⚠ goal blocked` |
 | Out of budget | `goal budget reached · 52K / 50K` |
 | Complete, or no goal | nothing |
+
+While a turn runs, the first glyph turns through `◐ ◓ ◑ ◒`, about every 150 ms.
 
 The session sidebar shows the objective of an unfinished goal at its bottom, next to the input, cut to three lines.
 
