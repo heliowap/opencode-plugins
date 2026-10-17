@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { appendCapped, logPath, rotatedPath } from "../src/log.ts"
+import { appendCapped, LOG_LIMIT, logPath, rotatedPath } from "../src/log.ts"
 
 let dir: string | undefined
 
@@ -36,6 +36,16 @@ test("a second rotation deletes the oldest lines, so both files stay within the 
   expect(readFileSync(rotated, "utf8")).toBe("line 46\nline 47\n")
 })
 
+test("the log keeps at most 200 MB", () => {
+  expect(LOG_LIMIT).toBe(209_715_200)
+})
+
+test("a line of exactly half the limit is kept", () => {
+  const path = join(temp(), "goal.jsonl")
+  appendCapped(path, "123456789", 20)
+  expect(readFileSync(path, "utf8")).toBe("123456789\n")
+})
+
 test("a line over half the limit is dropped instead of breaking the cap", () => {
   const path = join(temp(), "goal.jsonl")
   appendCapped(path, "x".repeat(30), 40)
@@ -44,9 +54,11 @@ test("a line over half the limit is dropped instead of breaking the cap", () => 
 
 test("rotatedPath names the older file", () => {
   expect(rotatedPath("/data/goal.jsonl")).toBe("/data/goal.1.jsonl")
+  expect(rotatedPath("/logs.jsonl.d/goal.jsonl")).toBe("/logs.jsonl.d/goal.1.jsonl")
 })
 
 test("logPath sits next to opencode.log in the data directory", () => {
   expect(logPath({ XDG_DATA_HOME: "/data" }, "/home/me")).toBe("/data/opencode/log/goal.jsonl")
   expect(logPath({}, "/home/me")).toBe("/home/me/.local/share/opencode/log/goal.jsonl")
+  expect(logPath({ XDG_DATA_HOME: "" }, "/home/me")).toBe("/home/me/.local/share/opencode/log/goal.jsonl")
 })

@@ -5,7 +5,7 @@ import { spawn } from "node:child_process"
 import { homedir } from "node:os"
 import { parseCommand, type GoalCommand } from "./command.ts"
 import { formatTokens } from "./format.ts"
-import { decodeGoal, editRefusal, isUnfinished, RETRY_LIMIT, step, type Check, type Goal, type GoalEffect, type GoalEvent } from "./goal.ts"
+import { decodeGoal, isUnfinished, retryDelays, step, type Check, type Goal, type GoalEffect, type GoalEvent } from "./goal.ts"
 import {
   budgetLimitPrompt,
   COMMAND_HELP,
@@ -17,7 +17,7 @@ import {
 } from "./prompts.ts"
 import { appendCapped, LOG_LIMIT, logPath } from "./log.ts"
 import { GoalRpc } from "./rpc.ts"
-import { commandRecord, errorRecord, logEnabled, toolErrorRecord, transitionRecord, type TraceRecord } from "./trace.ts"
+import { commandRecord, errorRecord, logEnabled, sessionOf, toolErrorRecord, transitionRecord, type GoalTool, type TraceRecord } from "./trace.ts"
 
 const CreateInput = Schema.Struct({
   objective: Schema.String.annotate({
@@ -56,16 +56,6 @@ const getInput = toolInput(Schema.Struct({}))
 
 const PLANNING_AGENTS = new Set(["plan"])
 
-const RETRY_DELAYS_MS = [30_000, 120_000, 300_000]
-
-// Host canaries shorten the waits.
-const retryDelays = (raw: string | undefined) => {
-  const parsed = raw?.split(",").map(Number)
-  return parsed?.length === RETRY_LIMIT && parsed.every((ms) => Number.isFinite(ms) && ms >= 0)
-    ? parsed
-    : RETRY_DELAYS_MS
-}
-
 const KEY_PREFIX = "goal/"
 
 // Per-turn bookkeeping for one location. It lives on globalThis so a plugin reload inside a running
@@ -75,6 +65,7 @@ interface LocationState {
   readonly agents: Map<string, string>
   readonly resumePending: Set<string>
   readonly closingSteps: Map<string, string>
+  readonly retries: Map<string, { readonly attempt: number; readonly at: number }>
 }
 
 const LOCATIONS: Map<string, LocationState> = ((globalThis as Record<symbol, Map<string, LocationState> | undefined>)[
@@ -84,7 +75,7 @@ const LOCATIONS: Map<string, LocationState> = ((globalThis as Record<symbol, Map
 const locationState = (directory: string) => {
   const existing = LOCATIONS.get(directory)
   if (existing) return { state: existing, fresh: false }
-  const state: LocationState = { activity: new Set(), agents: new Map(), resumePending: new Set(), closingSteps: new Map() }
+  const state: LocationState = { activity: new Set(), agents: new Map(), resumePending: new Set(), closingSteps: new Map(), retries: new Map() }
   LOCATIONS.set(directory, state)
   return { state, fresh: true }
 }
@@ -118,11 +109,6 @@ const runCheck = (command: string, directory: string) =>
     })
   })
 
-const eventSession = (event: { readonly data?: unknown }) => {
-  const sessionID = (event.data as { readonly sessionID?: unknown } | undefined)?.sessionID
-  return typeof sessionID === "string" ? sessionID : undefined
-}
-
 const toolError = (error: unknown) =>
   error instanceof Tool.Error ? error : new Tool.Error({ message: `goal: ${String(error)}` })
 
@@ -132,7 +118,8 @@ export default Plugin.define({
     Effect.gen(function* () {
       const lock = yield* Semaphore.make(1)
       const scope = yield* Effect.scope
-      const delays = retryDelays(process.env.GOAL_RETRY_DELAYS_MS)
+      const now = () => Date.now()
+      const delays = retryDelays(ctx.options.retryDelaysMs)
       const tracing = logEnabled(ctx.options, process.env)
       const traceFile = logPath(process.env, homedir())
 
@@ -146,25 +133,35 @@ export default Plugin.define({
             })
           : Effect.void
 
-      const failure = (where: string, sessionID?: string) => (cause: Cause.Cause<unknown>) =>
+      const logFailure = (where: string, sessionID?: string) => (cause: Cause.Cause<unknown>) =>
         Effect.logError(`goal: ${where} failed`, cause).pipe(
           Effect.andThen(trace(errorRecord(where, Cause.pretty(cause), sessionID, now()))),
         )
+
+      const failingTool = (tool: GoalTool, sessionID: string) =>
+        <A, R>(effect: Effect.Effect<A, unknown, R>) =>
+          effect.pipe(
+            Effect.mapError(toolError),
+            Effect.tapError((error) => trace(toolErrorRecord(sessionID, tool, error.message, now()))),
+          )
+
+      const goalOutput = ({ goal }: { readonly goal: Goal | undefined }) => ({ goal: goal ?? null })
+
       const { state, fresh } = locationState(ctx.location.directory)
-      const { activity, agents, resumePending, closingSteps } = state
+      const { activity, agents, resumePending, closingSteps, retries } = state
       const key = (sessionID: string) => `${KEY_PREFIX}${sessionID}`
-      const now = () => Date.now()
       const planning = (sessionID: string) => PLANNING_AGENTS.has(agents.get(sessionID) ?? "")
 
       const load = (sessionID: string) => ctx.storage.get(key(sessionID)).pipe(Effect.map(decodeGoal))
 
       const rpc = yield* ctx.rpc
         .register(GoalRpc, {
-          get: (input) => load((input as { sessionID: string }).sessionID).pipe(Effect.map((goal) => ({ goal: goal ?? null }))),
+          get: (input) => load((input as { sessionID: string }).sessionID).pipe(Effect.map((goal) => goalOutput({ goal }))),
           edit: (input) => {
             const { sessionID, objective } = input as { sessionID: string; objective: string }
             return transition(sessionID, { _tag: "Edit", objective }).pipe(
-              Effect.map(({ goal }) => ({ goal: goal ?? null })),
+              Effect.map(goalOutput),
+              Effect.tapCause(logFailure("goal.edit", sessionID)),
               Effect.orDie,
             )
           },
@@ -193,21 +190,33 @@ export default Plugin.define({
 
       const steer = (sessionID: string, text: string) => send(sessionID, text, { resume: true, delivery: "steer" })
 
-      const scheduleRetry = (sessionID: string, attempt: number) =>
-        Effect.forkIn(
-          Effect.sleep(delays[attempt - 1]!).pipe(
-            Effect.andThen(onEvent(sessionID, { _tag: "RetryDue", attempt })),
-            Effect.catchCause(failure("retry", sessionID)),
+      // The wait is kept in the location state, so a plugin reload can resume it where it stopped.
+      const scheduleRetry = (sessionID: string, attempt: number, at: number) =>
+        Effect.sync(() => retries.set(sessionID, { attempt, at })).pipe(
+          Effect.andThen(
+            Effect.forkIn(
+              Effect.sleep(Math.max(0, at - now())).pipe(
+                Effect.andThen(Effect.sync(() => retries.delete(sessionID))),
+                Effect.andThen(onEvent(sessionID, { _tag: "RetryDue", attempt })),
+                Effect.catchCause(logFailure("retry", sessionID)),
+              ),
+              scope,
+            ),
           ),
-          scope,
-        ).pipe(Effect.asVoid)
+          Effect.asVoid,
+        )
 
       const perform = (sessionID: string, goal: Goal | undefined, effect: GoalEffect) => {
         switch (effect._tag) {
           case "None":
             return Effect.void
           case "Notify":
+          case "Refuse":
             return notice(sessionID, effect.text)
+          case "OpenEditor":
+            return rpc.events
+              .emit("editRequested", { sessionID, objective: effect.objective })
+              .pipe(Effect.catchCause(logFailure("editRequested event", sessionID)))
           case "Continue":
             return goal ? queue(sessionID, continuationPrompt(goal, now())) : Effect.void
           case "WrapUp":
@@ -215,8 +224,7 @@ export default Plugin.define({
           case "ObjectiveUpdated":
             return goal ? steer(sessionID, objectiveUpdatedPrompt(goal, now())) : Effect.void
           case "Retry":
-            return scheduleRetry(sessionID, effect.attempt)
-
+            return scheduleRetry(sessionID, effect.attempt, now() + delays[effect.attempt - 1]!)
         }
       }
 
@@ -235,7 +243,7 @@ export default Plugin.define({
               yield* save(sessionID, next.goal)
               yield* rpc.events
                 .emit("changed", { sessionID, goal: next.goal ?? null })
-                .pipe(Effect.catchCause(failure("changed event", sessionID)))
+                .pipe(Effect.catchCause(logFailure("changed event", sessionID)))
             }
             if (!options.quiet) yield* perform(sessionID, next.goal, next.effect)
             return { before, goal: next.goal }
@@ -250,21 +258,14 @@ export default Plugin.define({
           Effect.flatMap((goal) => (goal ? Effect.asVoid(transition(sessionID, event, options)) : Effect.void)),
         )
 
-      const run = (sessionID: string, command: GoalCommand) => {
+      const runCommand = (sessionID: string, command: GoalCommand) => {
         switch (command._tag) {
           case "Invalid":
             return notice(sessionID, command.message)
           case "Status":
             return load(sessionID).pipe(Effect.flatMap((goal) => notice(sessionID, statusText(goal, now()))))
           case "EditPrompt":
-            return load(sessionID).pipe(
-              Effect.flatMap((goal) => {
-                const refusal = editRefusal(goal)
-                return refusal === undefined
-                  ? rpc.events.emit("editRequested", { sessionID, objective: goal!.objective })
-                  : notice(sessionID, refusal)
-              }),
-            )
+            return Effect.asVoid(transition(sessionID, { _tag: "EditRequested" }))
           case "Set":
             return Effect.asVoid(transition(sessionID, { ...command, directory: ctx.location.directory }))
           case "Edit":
@@ -281,7 +282,7 @@ export default Plugin.define({
           description: "Set, show, edit, pause, resume, or clear the session's persistent goal",
           execute: ({ sessionID, prompt }) => {
             const command = parseCommand(prompt.text)
-            return trace(commandRecord(sessionID, prompt.text.trim(), command, now())).pipe(Effect.andThen(run(sessionID, command)))
+            return trace(commandRecord(sessionID, prompt.text, command, now())).pipe(Effect.andThen(runCommand(sessionID, command)))
           },
         })
       })
@@ -310,10 +311,7 @@ export default Plugin.define({
                 })
               }
               return { content: `Goal created.\n${statusText(goal, now())}` }
-            }).pipe(
-              Effect.mapError(toolError),
-              Effect.tapError((error) => trace(toolErrorRecord(context.sessionID, "goal_create", error.message, now()))),
-            ),
+            }).pipe(failingTool("goal_create", context.sessionID)),
         })
         editor.add({
           name: "get",
@@ -324,8 +322,7 @@ export default Plugin.define({
           execute: (_input, context) =>
             load(context.sessionID).pipe(
               Effect.map((goal) => ({ content: `${statusText(goal, now())}\n\n${COMMAND_HELP}` })),
-              Effect.mapError(toolError),
-              Effect.tapError((error) => trace(toolErrorRecord(context.sessionID, "goal_get", error.message, now()))),
+              failingTool("goal_get", context.sessionID),
             ),
         })
         editor.add({
@@ -363,10 +360,7 @@ export default Plugin.define({
                   ? ""
                   : ` Usage so far: ${formatTokens(goal.tokensUsed)} of ${formatTokens(goal.tokenBudget)} tokens; this step is added when it ends.`
               return { content: `Goal ${goal.status}.${budget}` }
-            }).pipe(
-              Effect.mapError(toolError),
-              Effect.tapError((error) => trace(toolErrorRecord(context.sessionID, "goal_update", error.message, now()))),
-            ),
+            }).pipe(failingTool("goal_update", context.sessionID)),
         })
       })
 
@@ -439,14 +433,14 @@ export default Plugin.define({
       // A reload closes the previous scope and with it any pending retry wait.
       const startup = fresh
         ? forActiveGoals((sessionID) => transition(sessionID, { _tag: "Recovered" }, { quiet: true }))
-        : forActiveGoals((sessionID, goal) => (goal.failedTurns ? scheduleRetry(sessionID, goal.failedTurns) : Effect.void))
-      yield* startup.pipe(Effect.catchCause(failure("recovery")))
+        : Effect.forEach([...retries], ([sessionID, { attempt, at }]) => scheduleRetry(sessionID, attempt, at), { discard: true })
+      yield* startup.pipe(Effect.catchCause(logFailure("recovery")))
 
       yield* ctx.event.subscribe().pipe(
         Stream.runForEach((event) =>
-          handle(event).pipe(Effect.catchCause(failure(event.type, eventSession(event)))),
+          handle(event).pipe(Effect.catchCause(logFailure(event.type, sessionOf(event)))),
         ),
-        Effect.catchCause(failure("event stream")),
+        Effect.catchCause(logFailure("event stream")),
         Effect.forkScoped,
       )
     }),

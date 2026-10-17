@@ -85,7 +85,7 @@ At 100 MB the file moves to `goal.1.jsonl`, replacing the previous one, so the l
 
 Summarize it with `bun run report` in a clone of this repository, or `bun run report <sessionID>` for one session's timeline.
 
-Either of these turns it off: the plugin option `"log": false`, or `OPENCODE_GOAL_LOG=0` in the environment of the OpenCode server.
+Either of these turns it off: the plugin option `"log": false`, or `OPENCODE_GOAL_LOG=0` (or `false`) in the environment of the OpenCode server.
 
 ```jsonc
 { "plugins": [{ "package": "github:heliowap/opencode-v2-goal-plugin", "options": { "log": false } }] }
