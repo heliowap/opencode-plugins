@@ -23,7 +23,8 @@ This installs the plugin and adds it to your global `opencode.jsonc`. If `/goal`
 | Status above the input, objective in the sidebar, `/goal edit` editor (terminal UI) | Verified by 3 canaries that drive the real `opencode` terminal in tmux and read the screen |
 | Headless `opencode run` | Works against a running server (`--server` or the background service). With `--standalone` the goal stops after the first turn, see [Headless runs](#headless-runs) |
 | Live models | `devin/swe-2`, `gemini-3.8-flash`, and the free `nemotron-3.5-lightning-free` complete real goals, stop at budgets, and survive a restart |
-| `/goal` typed in the terminal UI, desktop and web apps, Windows, other OpenCode versions | Not established |
+| `/goal` typed in the terminal UI | `/goal edit` is typed in the real terminal by a canary; the other subcommands are not established there |
+| Desktop and web apps, Windows, other OpenCode versions | Not established |
 
 Details, session evidence, and what is not proven: [`docs/compatibility.md`](docs/compatibility.md).
 

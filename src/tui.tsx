@@ -27,7 +27,7 @@ const EditGoal = (props: { context: Context; objective: string; save: (objective
   const save = () => {
     const objective = editor?.plainText.trim() ?? ""
     context.ui.dialog.clear()
-    if (objective && objective !== props.objective) props.save(objective)
+    if (objective && objective !== props.objective.trim()) props.save(objective)
   }
   context.keymap.layer(() => ({
     mode: "modal",
@@ -93,7 +93,15 @@ export default Plugin.define({
       const route = context.ui.router.current()
       if (route.type !== "session" || route.sessionID !== sessionID) return
       context.ui.dialog.show(() => (
-        <EditGoal context={context} objective={objective} save={(next) => void rpc.edit({ sessionID, objective: next })} />
+        <EditGoal
+          context={context}
+          objective={objective}
+          save={(next) =>
+            void rpc
+              .edit({ sessionID, objective: next })
+              .catch(() => context.ui.toast.show({ message: "The goal could not be saved.", variant: "error" }))
+          }
+        />
       ))
       context.ui.dialog.set({ size: "large" })
     })

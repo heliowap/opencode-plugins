@@ -34,26 +34,28 @@ const badgeLine = () => {
   return above.slice(0, 100).trim()
 }
 
-const sees = async (expected: readonly string[], timeoutMs = 30_000) => {
+const waitFor = async (check: () => boolean, failure: string, timeoutMs = 30_000) => {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    const text = screen()
-    if (expected.every((line) => text.includes(line))) return
+    if (check()) return
     await Bun.sleep(250)
   }
-  throw new Error(`the screen never showed ${JSON.stringify(expected)}. Screen:\n${screen()}`)
+  throw new Error(`${failure} Screen:\n${screen()}`)
 }
+
+const sees = (expected: readonly string[]) =>
+  waitFor(
+    () => expected.every((line) => screen().includes(line)),
+    `the screen never showed ${JSON.stringify(expected)}.`,
+  )
 
 const type = (...keys: string[]) => expect(Bun.spawnSync(["tmux", "send-keys", "-t", terminal!, ...keys]).exitCode).toBe(0)
 
-const shows = async (expected: string, timeoutMs = 30_000) => {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (badgeLine() === expected) return
-    await Bun.sleep(250)
-  }
-  throw new Error(`the line above the input never showed "${expected}". Screen:\n${screen()}`)
-}
+const shows = (expected: string) =>
+  waitFor(
+    () => badgeLine() === expected,
+    `the line above the input never showed "${expected}".`,
+  )
 
 describe.skipIf(!tmux && !process.env.CI)("status above the input in the terminal UI", () => {
   test(
@@ -145,12 +147,10 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       type("C-s")
       await host.until(() => host!.stored(session)?.objective === `${objective} soon`)
       expect(host.stored(session)?.status).toBe("paused")
-      if (process.env.GOAL_TUI_DEBUG) console.log(screen())
 
       type("-l", "/goal edit")
       type("Enter")
       await sees(["Edit goal", "migration lands soon"])
-      if (process.env.GOAL_TUI_DEBUG) console.log(screen())
       type("-l", " discarded")
       type("Escape")
       await host.until(() => !screen().includes("Edit goal"))
