@@ -34,6 +34,18 @@ const badgeLine = () => {
   return above.slice(0, 100).trim()
 }
 
+const sees = async (expected: readonly string[], timeoutMs = 30_000) => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const text = screen()
+    if (expected.every((line) => text.includes(line))) return
+    await Bun.sleep(250)
+  }
+  throw new Error(`the screen never showed ${JSON.stringify(expected)}. Screen:\n${screen()}`)
+}
+
+const type = (...keys: string[]) => expect(Bun.spawnSync(["tmux", "send-keys", "-t", terminal!, ...keys]).exitCode).toBe(0)
+
 const shows = async (expected: string, timeoutMs = 30_000) => {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -100,6 +112,50 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       expect(host.stored(limited)).toMatchObject({ status: "budget_limited", tokensUsed: 240 })
       open(limited)
       await shows("goal budget reached · 240 / 100")
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "T3 the sidebar shows the objective in three lines, and a bare /goal edit opens it for editing",
+    async () => {
+      host = await Host.start({
+        script: () => ({ text: "Step." }),
+        ...(process.env.GOAL_PLUGIN_SPEC && { pluginSpec: process.env.GOAL_PLUGIN_SPEC }),
+      })
+      const session = await host.session()
+      const objective =
+        "make the checkout suite pass without changing the public API and keep every existing test green while the payment provider migration lands"
+      await host.goal(session, objective)
+      await host.goal(session, "pause")
+      await host.settle(session)
+      open(session)
+
+      await sees([
+        "make the checkout suite pass without",
+        "changing the public API and keep every",
+        "existing test green while the payment…",
+      ])
+      expect(screen()).not.toContain("provider migration")
+
+      type("-l", "/goal edit")
+      type("Enter")
+      await sees(["Edit goal", "provider migration lands"])
+      type("-l", " soon")
+      type("C-s")
+      await host.until(() => host!.stored(session)?.objective === `${objective} soon`)
+      expect(host.stored(session)?.status).toBe("paused")
+      if (process.env.GOAL_TUI_DEBUG) console.log(screen())
+
+      type("-l", "/goal edit")
+      type("Enter")
+      await sees(["Edit goal", "migration lands soon"])
+      if (process.env.GOAL_TUI_DEBUG) console.log(screen())
+      type("-l", " discarded")
+      type("Escape")
+      await host.until(() => !screen().includes("Edit goal"))
+      await Bun.sleep(1_000)
+      expect(host.stored(session)?.objective).toBe(`${objective} soon`)
     },
     TIMEOUT,
   )

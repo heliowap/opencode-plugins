@@ -4,10 +4,18 @@ export type GoalCommand =
   | { readonly _tag: "Resume" }
   | { readonly _tag: "Clear" }
   | { readonly _tag: "Edit"; readonly objective: string }
+  | { readonly _tag: "EditPrompt" }
   | { readonly _tag: "Set"; readonly objective: string; readonly tokenBudget: number | null; readonly verify: string | null }
   | { readonly _tag: "Invalid"; readonly message: string }
 
-const keywords = { "": "Status", status: "Status", pause: "Pause", resume: "Resume", clear: "Clear" } as const
+const keywords = {
+  "": "Status",
+  status: "Status",
+  pause: "Pause",
+  resume: "Resume",
+  clear: "Clear",
+  edit: "EditPrompt",
+} as const
 
 const multipliers: Record<string, number> = { "": 1, k: 1_000, m: 1_000_000 }
 
@@ -23,11 +31,8 @@ export const parseCommand = (text: string): GoalCommand => {
   const keyword = keywords[trimmed.toLowerCase() as keyof typeof keywords]
   if (keyword) return { _tag: keyword }
 
-  const edit = /^edit(?:\s+|$)/i.exec(trimmed)
-  if (edit) {
-    const objective = trimmed.slice(edit[0].length)
-    return objective ? { _tag: "Edit", objective } : { _tag: "Invalid", message: "Write the new objective after /goal edit." }
-  }
+  const edit = /^edit\s+/i.exec(trimmed)
+  if (edit) return { _tag: "Edit", objective: trimmed.slice(edit[0].length) }
 
   let rest = trimmed
   let tokenBudget: number | null = null

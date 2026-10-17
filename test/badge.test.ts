@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { goalBadge } from "../src/badge.ts"
+import { goalBadge, objectiveLines } from "../src/badge.ts"
 import type { Goal } from "../src/goal.ts"
 
 const goal = (overrides: Partial<Goal> = {}): Goal => ({
@@ -30,4 +30,24 @@ test("a complete goal shows nothing, and neither does a session without a goal",
   expect(goalBadge(goal({ status: "complete" }), false)).toBeUndefined()
   expect(goalBadge(undefined, true)).toBeUndefined()
   expect(goalBadge(goal(), false)).toEqual({ text: "◎ goal active · 12K / 50K", tone: "muted" })
+})
+
+test.each([
+  ["a short objective", "ship it", 10, ["ship it"]],
+  ["whitespace and line breaks collapse", "fix\n\n  the   login", 20, ["fix the login"]],
+  ["surrounding whitespace is dropped", "  ship it \n", 20, ["ship it"]],
+  ["words wrap at the width", "make the checkout suite pass", 10, ["make the", "checkout", "suite pass"]],
+  ["exactly three lines keep no ellipsis", "one two three four five six", 10, ["one two", "three four", "five six"]],
+  ["a fourth line ends the third with an ellipsis", "one two three four five six seven", 10, ["one two", "three four", "five six…"]],
+  ["a full third line is cut to fit the ellipsis", "aaaa bbbb cccc dddd eeee ffff gggg", 9, ["aaaa bbbb", "cccc dddd", "eeee fff…"]],
+  ["a word longer than the width breaks", "abcdefghij", 5, ["abcde", "fghij"]],
+] as const)("objectiveLines: %s", (_name, objective, width, expected) => {
+  expect(objectiveLines(goal({ objective }), width)).toEqual([...expected])
+})
+
+test("objectiveLines shows paused and blocked goals and hides complete ones and missing goals", () => {
+  expect(objectiveLines(goal({ status: "paused" }), 10)).toEqual(["ship it"])
+  expect(objectiveLines(goal({ status: "blocked" }), 10)).toEqual(["ship it"])
+  expect(objectiveLines(goal({ status: "complete" }), 10)).toBeUndefined()
+  expect(objectiveLines(undefined, 10)).toBeUndefined()
 })

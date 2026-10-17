@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { decodeGoal, isUnfinished, step, type Goal } from "../src/goal.ts"
+import { decodeGoal, editRefusal, isUnfinished, step, type Goal } from "../src/goal.ts"
 
 const T0 = 1_000
 const T1 = 2_000
@@ -462,5 +462,22 @@ describe("isUnfinished", () => {
     ["budget_limited", active({ status: "budget_limited" }), true],
   ] as const)("%s -> %p", (_name, goal, expected) => {
     expect(isUnfinished(goal)).toBe(expected)
+  })
+})
+
+describe("editRefusal", () => {
+  test.each([
+    ["no goal", undefined, "No goal is set for this session."],
+    ["complete", active({ status: "complete" }), "The goal is complete. Set a new goal instead."],
+    [
+      "out of budget",
+      active({ status: "budget_limited", tokenBudget: 1_000, tokensUsed: 1_200 }),
+      "The goal has used its token budget. Set a new goal with a larger --tokens budget.",
+    ],
+    ["active", active(), undefined],
+    ["paused", active({ status: "paused" }), undefined],
+    ["blocked", active({ status: "blocked" }), undefined],
+  ] as const)("%s -> %p", (_name, goal, expected) => {
+    expect(editRefusal(goal)).toBe(expected)
   })
 })
