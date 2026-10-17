@@ -19,7 +19,7 @@ This installs the plugin and adds it to your global `opencode.jsonc`. If `/goal`
 
 | Surface | Status |
 |---|---|
-| OpenCode 2.0.24 | Verified by 31 host canaries against a real `opencode serve`, graded on stored state. They run in CI on every push. |
+| OpenCode 2.0.24 | Verified by 35 host canaries against a real `opencode serve`, graded on stored state. They run in CI on every push. |
 | Status above the input, objective in the sidebar, `/goal edit` editor (terminal UI) | Verified by 3 canaries that drive the real `opencode` terminal in tmux and read the screen |
 | Headless `opencode run` | Works against a running server (`--server` or the background service). With `--standalone` the goal stops after the first turn, see [Headless runs](#headless-runs) |
 | Live models | `devin/swe-2`, `gemini-3.8-flash`, and the free `nemotron-3.5-lightning-free` complete real goals, stop at budgets, and survive a restart |
@@ -72,6 +72,25 @@ The agent can also create, read, and finish goals with the `goal_create`, `goal_
 
 All state rules live in the pure reducer `step` in `src/goal.ts`. `src/index.ts` only translates OpenCode events into `GoalEvent`s and runs the returned `GoalEffect`.
 
+## Trace log
+
+The plugin writes one JSON line per goal event to `$XDG_DATA_HOME/opencode/log/goal.jsonl` (`~/.local/share/opencode/log/goal.jsonl` by default), next to OpenCode's own log:
+
+- **Status changes and continued turns:** the event, the statuses before and after, the effect, token usage, and the note. A new or edited goal also records its objective.
+- **Every typed `/goal`:** the text as typed and what it parsed to, including refused commands.
+- **Every failed `goal_create`, `goal_get` or `goal_update` call,** with its error.
+- **Plugin failures** that the plugin caught, with their session when there is one.
+
+At 100 MB the file moves to `goal.1.jsonl`, replacing the previous one, so the log never takes more than 200 MB and the oldest records are deleted first. Several OpenCode processes on one machine share the file. If two of them rotate at the same moment, the older half can be deleted early.
+
+Summarize it with `bun run report` in a clone of this repository, or `bun run report <sessionID>` for one session's timeline.
+
+Either of these turns it off: the plugin option `"log": false`, or `OPENCODE_GOAL_LOG=0` in the environment of the OpenCode server.
+
+```jsonc
+{ "plugins": [{ "package": "github:heliowap/opencode-v2-goal-plugin", "options": { "log": false } }] }
+```
+
 ## Headless runs
 
 `opencode run` returns when its first turn ends. The server keeps continuing the goal after that, so a headless goal needs a server that outlives the command. `opencode run --standalone` stops its private server on exit, and the goal stops with it; it comes back paused the next time a server starts.
@@ -112,7 +131,7 @@ OpenCode reloads the plugin when you save files under `src/`.
 ```sh
 bun test                      # unit tests, 100% line and function coverage enforced
 bun run typecheck
-bun run mutation              # mutation testing: every mutant of goal.ts, command.ts, prompts.ts, badge.ts, format.ts must be killed
+bun run mutation              # mutation testing: every mutant of the files in stryker.config.json must be killed
 bun test ./host               # host canaries: needs `opencode` 2.0.24 on PATH
 LIVE_MODEL="<provider>/<model>" bun test ./host/live/live.test.ts   # live models, uses your provider config
 ```

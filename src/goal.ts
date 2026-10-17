@@ -97,8 +97,11 @@ export const editRefusal = (goal: Goal | undefined): string | undefined =>
 
 export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Step => {
   const unchanged: Step = { goal, effect: none }
+  // The goal.changed RPC event rejects undefined values, so a cleared field is removed.
   const update = (patch: Partial<Goal>, effect: GoalEffect = none): Step => ({
-    goal: goal && { ...goal, ...patch, updatedAt: now },
+    goal:
+      goal &&
+      (Object.fromEntries(Object.entries({ ...goal, ...patch, updatedAt: now }).filter(([, value]) => value !== undefined)) as Goal),
     effect,
   })
 

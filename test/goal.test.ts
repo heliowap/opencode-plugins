@@ -562,3 +562,12 @@ describe("editRefusal", () => {
     expect(editRefusal(goal)).toBe(expected)
   })
 })
+
+describe("cleared fields", () => {
+  test("a cleared field is removed, not set to undefined, so the goal stays valid JSON for the changed event", () => {
+    const completed = step(active({ failedTurns: 1 }), { _tag: "Complete", note: "done" }, T1).goal!
+    expect(Object.keys(completed)).not.toContain("failedTurns")
+    const resumed = step(active({ status: "blocked", note: "stuck" }), { _tag: "Resume" }, T1).goal!
+    expect(Object.keys(resumed)).not.toContain("note")
+  })
+})

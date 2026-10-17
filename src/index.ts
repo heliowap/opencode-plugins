@@ -1,8 +1,9 @@
 import { Plugin } from "@opencode/plugin/effect"
 import { Tool } from "@opencode/schema/tool"
-import { Effect, Schema, Semaphore, Stream } from "effect"
+import { Cause, Effect, Schema, Semaphore, Stream } from "effect"
 import { spawn } from "node:child_process"
-import { parseCommand } from "./command.ts"
+import { homedir } from "node:os"
+import { parseCommand, type GoalCommand } from "./command.ts"
 import { formatTokens } from "./format.ts"
 import { decodeGoal, editRefusal, isUnfinished, RETRY_LIMIT, step, type Check, type Goal, type GoalEffect, type GoalEvent } from "./goal.ts"
 import {
@@ -14,7 +15,9 @@ import {
   statusText,
   verifyFailedText,
 } from "./prompts.ts"
+import { appendCapped, LOG_LIMIT, logPath } from "./log.ts"
 import { GoalRpc } from "./rpc.ts"
+import { commandRecord, errorRecord, logEnabled, toolErrorRecord, transitionRecord, type TraceRecord } from "./trace.ts"
 
 const CreateInput = Schema.Struct({
   objective: Schema.String.annotate({
@@ -115,6 +118,11 @@ const runCheck = (command: string, directory: string) =>
     })
   })
 
+const eventSession = (event: { readonly data?: unknown }) => {
+  const sessionID = (event.data as { readonly sessionID?: unknown } | undefined)?.sessionID
+  return typeof sessionID === "string" ? sessionID : undefined
+}
+
 const toolError = (error: unknown) =>
   error instanceof Tool.Error ? error : new Tool.Error({ message: `goal: ${String(error)}` })
 
@@ -125,6 +133,23 @@ export default Plugin.define({
       const lock = yield* Semaphore.make(1)
       const scope = yield* Effect.scope
       const delays = retryDelays(process.env.GOAL_RETRY_DELAYS_MS)
+      const tracing = logEnabled(ctx.options, process.env)
+      const traceFile = logPath(process.env, homedir())
+
+      // The log is a diagnostic aid: a write that fails must never fail the goal.
+      const trace = (record: TraceRecord | undefined) =>
+        tracing && record
+          ? Effect.sync(() => {
+              try {
+                appendCapped(traceFile, JSON.stringify(record), LOG_LIMIT)
+              } catch {}
+            })
+          : Effect.void
+
+      const failure = (where: string, sessionID?: string) => (cause: Cause.Cause<unknown>) =>
+        Effect.logError(`goal: ${where} failed`, cause).pipe(
+          Effect.andThen(trace(errorRecord(where, Cause.pretty(cause), sessionID, now()))),
+        )
       const { state, fresh } = locationState(ctx.location.directory)
       const { activity, agents, resumePending, closingSteps } = state
       const key = (sessionID: string) => `${KEY_PREFIX}${sessionID}`
@@ -172,7 +197,7 @@ export default Plugin.define({
         Effect.forkIn(
           Effect.sleep(delays[attempt - 1]!).pipe(
             Effect.andThen(onEvent(sessionID, { _tag: "RetryDue", attempt })),
-            Effect.catchCause((cause) => Effect.logError("goal: retry failed", cause)),
+            Effect.catchCause(failure("retry", sessionID)),
           ),
           scope,
         ).pipe(Effect.asVoid)
@@ -205,11 +230,12 @@ export default Plugin.define({
           Effect.gen(function* () {
             const before = yield* load(sessionID)
             const next = step(before, event, now())
+            yield* trace(transitionRecord(sessionID, event, before, next.goal, next.effect, now()))
             if (next.goal !== before) {
               yield* save(sessionID, next.goal)
               yield* rpc.events
                 .emit("changed", { sessionID, goal: next.goal ?? null })
-                .pipe(Effect.catchCause((cause) => Effect.logError("goal: changed event failed", cause)))
+                .pipe(Effect.catchCause(failure("changed event", sessionID)))
             }
             if (!options.quiet) yield* perform(sessionID, next.goal, next.effect)
             return { before, goal: next.goal }
@@ -224,34 +250,38 @@ export default Plugin.define({
           Effect.flatMap((goal) => (goal ? Effect.asVoid(transition(sessionID, event, options)) : Effect.void)),
         )
 
+      const run = (sessionID: string, command: GoalCommand) => {
+        switch (command._tag) {
+          case "Invalid":
+            return notice(sessionID, command.message)
+          case "Status":
+            return load(sessionID).pipe(Effect.flatMap((goal) => notice(sessionID, statusText(goal, now()))))
+          case "EditPrompt":
+            return load(sessionID).pipe(
+              Effect.flatMap((goal) => {
+                const refusal = editRefusal(goal)
+                return refusal === undefined
+                  ? rpc.events.emit("editRequested", { sessionID, objective: goal!.objective })
+                  : notice(sessionID, refusal)
+              }),
+            )
+          case "Set":
+            return Effect.asVoid(transition(sessionID, { ...command, directory: ctx.location.directory }))
+          case "Edit":
+          case "Pause":
+          case "Resume":
+          case "Clear":
+            return Effect.asVoid(transition(sessionID, command))
+        }
+      }
+
       yield* ctx.command.transform((editor) => {
         editor.add({
           name: "goal",
           description: "Set, show, edit, pause, resume, or clear the session's persistent goal",
           execute: ({ sessionID, prompt }) => {
             const command = parseCommand(prompt.text)
-            switch (command._tag) {
-              case "Invalid":
-                return notice(sessionID, command.message)
-              case "Status":
-                return load(sessionID).pipe(Effect.flatMap((goal) => notice(sessionID, statusText(goal, now()))))
-              case "EditPrompt":
-                return load(sessionID).pipe(
-                  Effect.flatMap((goal) => {
-                    const refusal = editRefusal(goal)
-                    return refusal === undefined
-                      ? rpc.events.emit("editRequested", { sessionID, objective: goal!.objective })
-                      : notice(sessionID, refusal)
-                  }),
-                )
-              case "Set":
-                return Effect.asVoid(transition(sessionID, { ...command, directory: ctx.location.directory }))
-              case "Edit":
-              case "Pause":
-              case "Resume":
-              case "Clear":
-                return Effect.asVoid(transition(sessionID, command))
-            }
+            return trace(commandRecord(sessionID, prompt.text.trim(), command, now())).pipe(Effect.andThen(run(sessionID, command)))
           },
         })
       })
@@ -280,7 +310,10 @@ export default Plugin.define({
                 })
               }
               return { content: `Goal created.\n${statusText(goal, now())}` }
-            }).pipe(Effect.mapError(toolError)),
+            }).pipe(
+              Effect.mapError(toolError),
+              Effect.tapError((error) => trace(toolErrorRecord(context.sessionID, "goal_create", error.message, now()))),
+            ),
         })
         editor.add({
           name: "get",
@@ -291,6 +324,8 @@ export default Plugin.define({
           execute: (_input, context) =>
             load(context.sessionID).pipe(
               Effect.map((goal) => ({ content: `${statusText(goal, now())}\n\n${COMMAND_HELP}` })),
+              Effect.mapError(toolError),
+              Effect.tapError((error) => trace(toolErrorRecord(context.sessionID, "goal_get", error.message, now()))),
             ),
         })
         editor.add({
@@ -328,7 +363,10 @@ export default Plugin.define({
                   ? ""
                   : ` Usage so far: ${formatTokens(goal.tokensUsed)} of ${formatTokens(goal.tokenBudget)} tokens; this step is added when it ends.`
               return { content: `Goal ${goal.status}.${budget}` }
-            }).pipe(Effect.mapError(toolError)),
+            }).pipe(
+              Effect.mapError(toolError),
+              Effect.tapError((error) => trace(toolErrorRecord(context.sessionID, "goal_update", error.message, now()))),
+            ),
         })
       })
 
@@ -402,13 +440,13 @@ export default Plugin.define({
       const startup = fresh
         ? forActiveGoals((sessionID) => transition(sessionID, { _tag: "Recovered" }, { quiet: true }))
         : forActiveGoals((sessionID, goal) => (goal.failedTurns ? scheduleRetry(sessionID, goal.failedTurns) : Effect.void))
-      yield* startup.pipe(Effect.catchCause((cause) => Effect.logError("goal: recovery failed", cause)))
+      yield* startup.pipe(Effect.catchCause(failure("recovery")))
 
       yield* ctx.event.subscribe().pipe(
         Stream.runForEach((event) =>
-          handle(event).pipe(Effect.catchCause((cause) => Effect.logError(`goal: ${event.type} failed`, cause))),
+          handle(event).pipe(Effect.catchCause(failure(event.type, eventSession(event)))),
         ),
-        Effect.catchCause((cause) => Effect.logError("goal: event stream stopped", cause)),
+        Effect.catchCause(failure("event stream")),
         Effect.forkScoped,
       )
     }),

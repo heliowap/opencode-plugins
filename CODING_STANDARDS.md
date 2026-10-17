@@ -19,6 +19,7 @@
 - Per-turn bookkeeping (`activity`, `agents`, `resumePending`, `closingSteps`) lives in the per-location `LocationState` on `globalThis`, so a plugin reload keeps turns in flight. Recovery after a restart runs only when that state is fresh.
 - `goal_update` with `complete` runs the user's `--verify` command before `transition`, outside the semaphore, and passes the result to `step` as `Complete.check`. The reducer accepts the check only for the goal's current command.
 - A `Retry` effect forks a sleep into the plugin scope, then sends `RetryDue` with its attempt through `transition`; the reducer drops a `RetryDue` whose attempt no longer matches `failedTurns`. It sends no notice, because a queued notice starts a turn at once. A location reload reschedules pending waits. `GOAL_RETRY_DELAYS_MS` exists only so host canaries can shorten the waits.
+- `src/trace.ts` builds the trace log records as pure functions, `src/log.ts` appends them with `appendCapped`, and `src/report.ts` summarizes them for `bun run report`. Records are a tagged union, `TraceRecord`. Every `transition`, typed `/goal`, failed `goal_*` tool call, and caught handler failure writes one record through `trace`, which swallows write errors so the log can never fail a goal.
 - Storage changes go through `transition` too, including deletion: a deleted session is a quiet `Clear`.
 
 ## Persistence
@@ -40,7 +41,7 @@ Keep a comment only for a non-obvious why, such as a host quirk. State the obser
 - Test behavior: call `step`, `parseCommand`, and the prompt functions the way the plugin does, and assert against literal expected values with `toEqual`. For rendered templates, assert the filled slots with `toContain` on a literal line instead of pinning the whole template text.
 - Every reducer branch has a test. A new event or effect ships with its tests.
 - `bun test` and `bun run typecheck` pass before every commit.
-- `bun run mutation` keeps a 100% mutation score on `src/goal.ts`, `src/command.ts`, `src/prompts.ts`, `src/badge.ts`, and `src/format.ts`. A surviving mutant means a missing test or redundant code: add the test, or delete the code. Do not exclude mutants.
+- `bun run mutation` keeps a 100% mutation score on the files in `mutate` of `stryker.config.json`. Pure logic goes in one of those files. A surviving mutant means a missing test or redundant code: add the test, or delete the code. Do not exclude mutants.
 
 ## Host canaries
 

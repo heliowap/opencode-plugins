@@ -12,7 +12,8 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsgo --noEmit",
-    "mutation": "stryker run"
+    "mutation": "stryker run",
+    "report": "bun scripts/report.ts"
   },
   "dependencies": {
     "@opencode/plugin": "2.0.24",
