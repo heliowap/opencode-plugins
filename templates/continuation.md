@@ -53,4 +53,10 @@ Blocked audit:
 - Once the blocked threshold is satisfied, do not keep reporting that you are still blocked while leaving the goal active; call goal_update with status "blocked".
 - Never use status "blocked" merely because the work is hard, slow, uncertain, incomplete, or would benefit from clarification.
 
+Statuses:
+- `complete`: every requirement of the objective is met and verified. Work that is done except for blocked parts is not complete.
+- `blocked`: no remaining requirement can move forward without user input or an external change, and the same blocker has repeated for three consecutive goal turns. It means the goal is stuck, not that it is finished. In note, list each unmet requirement and what it needs.
+- `paused`: only when the user asks to pause.
+When some requirements are done and others are blocked, the goal is not complete: keep moving any requirement that can still move, and use `blocked` only once none can.
+
 Call goal_update only after the completion or blocked audit passes, or when the user explicitly requests pausing this goal. For a requested pause, use status "paused", report the returned status, and stop goal work; never pause on your own initiative. Do not mark a goal complete merely because the budget is nearly exhausted or because you are stopping work.

@@ -19,7 +19,7 @@ This installs the plugin and adds it to your global `opencode.jsonc`. If `/goal`
 
 | Surface | Status |
 |---|---|
-| OpenCode 2.0.24 | Verified by 27 host canaries against a real `opencode serve`, graded on stored state. They run in CI on every push. |
+| OpenCode 2.0.24 | Verified by 29 host canaries against a real `opencode serve`, graded on stored state. They run in CI on every push. |
 | Status above the input, objective in the sidebar, `/goal edit` editor (terminal UI) | Verified by 3 canaries that drive the real `opencode` terminal in tmux and read the screen |
 | Headless `opencode run` | Works against a running server (`--server` or the background service). With `--standalone` the goal stops after the first turn, see [Headless runs](#headless-runs) |
 | Live models | `devin/swe-2`, `gemini-3.8-flash`, and the free `nemotron-3.5-lightning-free` complete real goals, stop at budgets, and survive a restart |
@@ -67,7 +67,7 @@ The agent can also create, read, and finish goals with the `goal_create`, `goal_
 - The model may mark the goal `blocked` only after the same blocker repeats for three turns, and `paused` only at the user's request.
 - Token usage is counted from each model step (input, output, and reasoning tokens). Crossing `--tokens` marks the goal `budget_limited` and steers the agent to wrap up.
 - With `--verify "cmd"`, `goal_update` with `complete` first runs `cmd` with `sh -c` in the goal's directory. The goal completes only if it exits 0. Otherwise the goal stays open, the plugin counts the failed check, and the model gets the exit code and the end of the output. Interrupting the turn kills the command. Only the user can set the command: `goal_create` cannot, because a plugin tool cannot ask for `bash` permission per call.
-- A user interrupt pauses the goal. A failed turn blocks it so retries cannot loop.
+- A user interrupt pauses the goal. A turn that fails with an HTTP 5xx error, after OpenCode's own retries, is retried up to three times, 30 s, 2 min, and 5 min later; the goal stays active meanwhile. Any other failure, including a rate limit (429), and a fourth server error in a row block the goal so retries cannot loop.
 - Turns run by the `plan` agent neither count nor continue the goal.
 
 All state rules live in the pure reducer `step` in `src/goal.ts`. `src/index.ts` only translates OpenCode events into `GoalEvent`s and runs the returned `GoalEffect`.

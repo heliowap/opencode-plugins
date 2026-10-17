@@ -18,6 +18,7 @@
 - Synthetic messages: `resume: true` starts a turn, `delivery: "steer"` lands in the running turn, `"queue"` waits for the next one. Send continuations through `queue`, which sends at most one until the next turn starts. Send wrap-ups and objective updates through `steer`, which is never deduplicated.
 - Per-turn bookkeeping (`activity`, `agents`, `resumePending`, `closingSteps`) lives in the per-location `LocationState` on `globalThis`, so a plugin reload keeps turns in flight. Recovery after a restart runs only when that state is fresh.
 - `goal_update` with `complete` runs the user's `--verify` command before `transition`, outside the semaphore, and passes the result to `step` as `Complete.check`. The reducer accepts the check only for the goal's current command.
+- A `Retry` effect forks a sleep into the plugin scope, then sends `RetryDue` through `transition`. It sends no notice, because a queued notice starts a turn at once. `GOAL_RETRY_DELAYS_MS` exists only so host canaries can shorten the waits.
 - Storage changes go through `transition` too, including deletion: a deleted session is a quiet `Clear`.
 
 ## Persistence

@@ -312,6 +312,69 @@ describe("interruptions and failures", () => {
       active({ status: "blocked", note: "Turn failed: rate limited", updatedAt: T1 }),
     )
   })
+
+  test("a rate limit (429) blocks without a retry", () => {
+    expect(step(active(), { _tag: "Failed", message: "rate limited", status: 429 }, T1)).toEqual({
+      goal: active({ status: "blocked", note: "Turn failed: rate limited", updatedAt: T1 }),
+      effect: { _tag: "None" },
+    })
+  })
+
+  test.each([500, 503, 599])("a server error (%p) keeps the goal active and schedules the first retry", (status) => {
+    expect(step(active(), { _tag: "Failed", message: "unavailable", status }, T1)).toEqual({
+      goal: active({ failedTurns: 1, updatedAt: T1 }),
+      effect: { _tag: "Retry", attempt: 1 },
+    })
+  })
+
+  test("the third consecutive server error schedules the last retry", () => {
+    expect(step(active({ failedTurns: 2 }), { _tag: "Failed", message: "unavailable", status: 503 }, T1)).toEqual({
+      goal: active({ failedTurns: 3, updatedAt: T1 }),
+      effect: { _tag: "Retry", attempt: 3 },
+    })
+  })
+
+  test("the fourth consecutive server error blocks and says how many retries ran", () => {
+    expect(step(active({ failedTurns: 3 }), { _tag: "Failed", message: "unavailable", status: 503 }, T1)).toEqual({
+      goal: active({ status: "blocked", failedTurns: 3, note: "Turn failed after 3 retries: unavailable", updatedAt: T1 }),
+      effect: { _tag: "None" },
+    })
+  })
+
+  test("a non-server error after retries blocks with the retry count", () => {
+    expect(step(active({ failedTurns: 1 }), { _tag: "Failed", message: "bad request", status: 400 }, T1).goal).toEqual(
+      active({ status: "blocked", failedTurns: 1, note: "Turn failed after 1 retries: bad request", updatedAt: T1 }),
+    )
+  })
+
+  test("a due retry continues an active goal", () => {
+    const goal = active({ failedTurns: 1 })
+    expect(step(goal, { _tag: "RetryDue" }, T1)).toEqual({ goal, effect: { _tag: "Continue" } })
+  })
+
+  test.each(["paused", "blocked", "complete", "budget_limited"] as const)("a due retry does nothing to a %s goal", (status) => {
+    const goal = active({ status, failedTurns: 1 })
+    expect(step(goal, { _tag: "RetryDue" }, T1)).toEqual({ goal, effect: { _tag: "None" } })
+  })
+
+  test("a due retry does nothing without a goal", () => {
+    expect(step(undefined, { _tag: "RetryDue" }, T1)).toEqual({ goal: undefined, effect: { _tag: "None" } })
+  })
+
+  test("a turn that ends clears the failure streak", () => {
+    expect(step(active({ failedTurns: 2 }), turn(true), T1)).toEqual({
+      goal: active({ updatedAt: T1 }),
+      effect: { _tag: "Continue" },
+    })
+    expect(step(active({ failedTurns: 2 }), turn(false), T1).goal).toEqual(active({ emptyTurns: 1, updatedAt: T1 }))
+  })
+
+  test("resume clears the failure streak", () => {
+    expect(step(active({ status: "blocked", failedTurns: 3, note: "x" }), { _tag: "Resume" }, T1)).toEqual({
+      goal: active({ updatedAt: T1 }),
+      effect: { _tag: "Continue" },
+    })
+  })
 })
 
 describe("user controls", () => {

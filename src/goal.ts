@@ -14,6 +14,7 @@ export const Goal = Schema.Struct({
   verify: Schema.optional(Schema.String),
   verifyFailures: Schema.optional(Schema.Int),
   lastExitCode: Schema.optional(Schema.Int),
+  failedTurns: Schema.optional(Schema.Int),
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
 })
@@ -23,6 +24,10 @@ export const decodeGoal = (value: unknown): Goal | undefined =>
   Option.getOrUndefined(Schema.decodeUnknownOption(Goal)(value))
 
 const EMPTY_TURN_LIMIT = 3
+export const RETRY_LIMIT = 3
+
+// OpenCode reports HTTP statuses up to 599.
+const serverError = (status: number | undefined) => (status ?? 0) >= 500
 
 export type GoalEvent =
   | {
@@ -50,7 +55,8 @@ export type GoalEvent =
   | { readonly _tag: "Usage"; readonly tokens: number; readonly closing: boolean }
   | { readonly _tag: "TurnEnded"; readonly activity: boolean; readonly planning: boolean }
   | { readonly _tag: "Interrupted"; readonly reason: "user" | "shutdown" | "superseded" | "inactivity" }
-  | { readonly _tag: "Failed"; readonly message: string }
+  | { readonly _tag: "Failed"; readonly message: string; readonly status?: number }
+  | { readonly _tag: "RetryDue" }
   | { readonly _tag: "Recovered" }
 
 export interface Check {
@@ -64,6 +70,7 @@ export type GoalEffect =
   | { readonly _tag: "WrapUp" }
   | { readonly _tag: "ObjectiveUpdated" }
   | { readonly _tag: "Notify"; readonly text: string }
+  | { readonly _tag: "Retry"; readonly attempt: number }
 
 interface Step {
   readonly goal: Goal | undefined
@@ -143,7 +150,7 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
       if (goal.status === "active") return { goal, effect: notify("The goal is already active.") }
       const refusal = resumeRefusal(goal)
       if (refusal) return { goal, effect: notify(refusal) }
-      return update({ status: "active", note: undefined, emptyTurns: 0 }, { _tag: "Continue" })
+      return update({ status: "active", note: undefined, emptyTurns: 0, failedTurns: undefined }, { _tag: "Continue" })
     }
     case "Complete": {
       if (goal.status !== "active" && goal.status !== "budget_limited") return unchanged
@@ -180,15 +187,29 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
       return goal.status === "active"
         ? update({ status: "paused", note: "Recovered after a restart. Run /goal resume to continue." })
         : unchanged
-    case "Failed":
-      return goal.status === "active" ? update({ status: "blocked", note: `Turn failed: ${event.message}` }) : unchanged
+    case "Failed": {
+      if (goal.status !== "active") return unchanged
+      const failed = goal.failedTurns ?? 0
+      if (serverError(event.status) && failed < RETRY_LIMIT) {
+        return update({ failedTurns: failed + 1 }, { _tag: "Retry", attempt: failed + 1 })
+      }
+      const retries = failed ? ` after ${failed} retries` : ""
+      return update({ status: "blocked", note: `Turn failed${retries}: ${event.message}` })
+    }
+    case "RetryDue":
+      return goal.status === "active" ? { goal, effect: { _tag: "Continue" } } : unchanged
     case "TurnEnded": {
       if (goal.status !== "active" || event.planning) return unchanged
-      if (event.activity) return update({ emptyTurns: 0 }, { _tag: "Continue" })
+      if (event.activity) return update({ emptyTurns: 0, failedTurns: undefined }, { _tag: "Continue" })
       const emptyTurns = goal.emptyTurns + 1
       return emptyTurns >= EMPTY_TURN_LIMIT
-        ? update({ emptyTurns, status: "blocked", note: `${EMPTY_TURN_LIMIT} consecutive turns produced no output.` })
-        : update({ emptyTurns }, { _tag: "Continue" })
+        ? update({
+            emptyTurns,
+            failedTurns: undefined,
+            status: "blocked",
+            note: `${EMPTY_TURN_LIMIT} consecutive turns produced no output.`,
+          })
+        : update({ emptyTurns, failedTurns: undefined }, { _tag: "Continue" })
     }
   }
 }

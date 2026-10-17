@@ -14,6 +14,8 @@ export interface HostOptions {
   readonly model?: { readonly providerID: string; readonly id: string; readonly variant?: string }
   readonly providers?: Record<string, unknown>
   readonly allowAll?: boolean
+  readonly noHostRetry?: boolean
+  readonly env?: Record<string, string>
 }
 
 export interface Session {
@@ -73,6 +75,10 @@ export class Host {
       await mkdir(join(config, "plugins"), { recursive: true })
       await symlink(join(REPO, "src"), join(config, "plugins", "goal"))
     }
+    if (options.noHostRetry) {
+      await mkdir(join(config, "plugins"), { recursive: true })
+      await symlink(join(REPO, "host", "harness", "no-host-retry"), join(config, "plugins", "no-host-retry"))
+    }
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
       HOME: join(root, "home"),
@@ -83,6 +89,7 @@ export class Host {
       OPENCODE_SERVER_PASSWORD: PASSWORD,
       OPENCODE_DISABLE_AUTOUPDATE: "1",
       OPENCODE_DISABLE_MODELS_FETCH: "1",
+      ...options.env,
     }
     delete env.BUN_BE_BUN
     const port = freePort()

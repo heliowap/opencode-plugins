@@ -53,6 +53,16 @@ const getInput = toolInput(Schema.Struct({}))
 
 const PLANNING_AGENTS = new Set(["plan"])
 
+const RETRY_DELAYS_MS = [30_000, 120_000, 300_000]
+
+// Host canaries shorten the waits; a value that does not parse keeps the defaults.
+const retryDelays = (raw: string | undefined) => {
+  const parsed = raw?.split(",").map(Number)
+  return parsed?.length === RETRY_DELAYS_MS.length && parsed.every((ms) => Number.isFinite(ms) && ms >= 0)
+    ? parsed
+    : RETRY_DELAYS_MS
+}
+
 const KEY_PREFIX = "goal/"
 
 // Per-turn bookkeeping for one location. It lives on globalThis so a plugin reload inside a running
@@ -113,6 +123,8 @@ export default Plugin.define({
   effect: (ctx) =>
     Effect.gen(function* () {
       const lock = yield* Semaphore.make(1)
+      const scope = yield* Effect.scope
+      const delays = retryDelays(process.env.GOAL_RETRY_DELAYS_MS)
       const { state, fresh } = locationState(ctx.location.directory)
       const { activity, agents, resumePending, closingSteps } = state
       const key = (sessionID: string) => `${KEY_PREFIX}${sessionID}`
@@ -168,6 +180,15 @@ export default Plugin.define({
             return goal ? steer(sessionID, budgetLimitPrompt(goal, now())) : Effect.void
           case "ObjectiveUpdated":
             return goal ? steer(sessionID, objectiveUpdatedPrompt(goal, now())) : Effect.void
+          // A notice here would start a turn at once and skip the wait.
+          case "Retry":
+            return Effect.forkIn(
+              Effect.sleep(delays[effect.attempt - 1]!).pipe(
+                Effect.andThen(onEvent(sessionID, { _tag: "RetryDue" })),
+                Effect.catchCause((cause) => Effect.logError("goal: retry failed", cause)),
+              ),
+              scope,
+            ).pipe(Effect.asVoid)
         }
       }
 
@@ -345,7 +366,11 @@ export default Plugin.define({
           case "session.execution.interrupted":
             return onEvent(event.data.sessionID, { _tag: "Interrupted", reason: event.data.reason })
           case "session.execution.failed":
-            return onEvent(event.data.sessionID, { _tag: "Failed", message: event.data.error.message })
+            return onEvent(event.data.sessionID, {
+              _tag: "Failed",
+              message: event.data.error.message,
+              ...(event.data.error.status !== undefined && { status: event.data.error.status }),
+            })
           case "session.moved":
             return onEvent(event.data.sessionID, { _tag: "Moved", directory: event.data.location.directory })
           case "session.deleted":

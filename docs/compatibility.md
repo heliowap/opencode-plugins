@@ -4,7 +4,7 @@ Every claim here comes from a real `opencode serve` process with no mocked plugi
 
 ## Host canaries (deterministic)
 
-`host/*.test.ts` runs OpenCode 2.0.24 against a scripted OpenAI-compatible fixture provider (`host/harness/fixture.ts`). The fixture controls each reply, its timing, errors, and the exact token usage, so these results reproduce on every run. CI runs one runner per file on Linux. They also pass locally on macOS arm64.
+`host/*.test.ts` runs OpenCode 2.0.24 against a scripted OpenAI-compatible fixture provider (`host/harness/fixture.ts`). The fixture controls each reply, its timing, errors, and the exact token usage, so these results reproduce on every run. A8b and A8c load `host/harness/no-host-retry`, which turns off OpenCode's own provider retries, and set `GOAL_RETRY_DELAYS_MS` to shorten the plugin's waits. CI runs one runner per file on Linux. They also pass locally on macOS arm64.
 
 | # | Scenario | Result | Graded on |
 |---|---|---|---|
@@ -19,6 +19,8 @@ Every claim here comes from a real `opencode serve` process with no mocked plugi
 | A7a | Interrupt pauses, resume continues | ✅ | stored `paused` with note, then `complete` |
 | A7b | `/goal pause` mid-turn starts no other turn | ✅ | stored `paused`, exactly 2 model requests (the second answers the pause notice) |
 | A8 | A provider error blocks instead of looping | ✅ | stored `blocked` with the error, exactly 1 model request |
+| A8b | A server error (503) is retried and the goal finishes without the user | ✅ | stored `complete`, `failedTurns: 1`, exactly 3 model requests |
+| A8c | A server error that persists blocks after three retries | ✅ | stored `blocked`, `failedTurns: 3`, note `Turn failed after 3 retries: …`, exactly 4 model requests |
 | A9 | `plan`-agent turns neither count nor continue | ✅ | stored `active`, `tokensUsed: 0`, one continuation in the last request |
 | A10 | Tools refuse a second goal and impossible transitions | ✅ | exact tool results, stored `blocked` |
 | A11 | The objective reaches the model escaped | ✅ | captured request text |

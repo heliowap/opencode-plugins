@@ -202,3 +202,17 @@ test("a failed check with no output says so", () => {
     ].join("\n"),
   )
 })
+
+test("continuation defines each status the model can set", () => {
+  const prompt = continuationPrompt(goal, 0)
+  expect(prompt).toContain(
+    "- `complete`: every requirement of the objective is met and verified. Work that is done except for blocked parts is not complete.",
+  )
+  expect(prompt).toContain(
+    "- `blocked`: no remaining requirement can move forward without user input or an external change, and the same blocker has repeated for three consecutive goal turns. It means the goal is stuck, not that it is finished. In note, list each unmet requirement and what it needs.",
+  )
+  expect(prompt).toContain("- `paused`: only when the user asks to pause.")
+  expect(prompt).toContain(
+    "When some requirements are done and others are blocked, the goal is not complete: keep moving any requirement that can still move, and use `blocked` only once none can.",
+  )
+})
