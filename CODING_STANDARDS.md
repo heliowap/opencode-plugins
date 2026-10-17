@@ -49,6 +49,6 @@ Changes to `src/index.ts` or event handling need a host canary in `host/`. A can
 
 For checks against your own running service:
 
-- The service hot-reloads the plugin through the `~/.config/opencode/plugins/goal` directory symlink (see README, Develop), so saving `src/` changes every live session. Running `opencode service restart` from inside an OpenCode session kills that session too.
+- The service hot-reloads the plugin only when it is loaded through the `~/.config/opencode/plugins/goal` directory symlink (see README, Develop); then saving `src/` changes every live session. Running `opencode service restart` from inside an OpenCode session kills that session too.
 - `opencode run` sends `/goal ...` as plain text. Invoke the command with `opencode api post /api/session/<id>/command --data '{"name":"goal","text":"..."}'`.
 - Run each scenario in its own temp directory and session. Read the outcome from `opencode session export <id>` and `opencode api get /api/session/<id>/inbox`.
