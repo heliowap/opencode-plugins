@@ -4,7 +4,7 @@ import { Effect, Schema, Semaphore, Stream } from "effect"
 import { spawn } from "node:child_process"
 import { parseCommand } from "./command.ts"
 import { formatTokens } from "./format.ts"
-import { decodeGoal, editRefusal, isUnfinished, step, type Check, type Goal, type GoalEffect, type GoalEvent } from "./goal.ts"
+import { decodeGoal, editRefusal, isUnfinished, RETRY_LIMIT, step, type Check, type Goal, type GoalEffect, type GoalEvent } from "./goal.ts"
 import {
   budgetLimitPrompt,
   COMMAND_HELP,
@@ -52,6 +52,16 @@ const updateInput = toolInput(UpdateInput)
 const getInput = toolInput(Schema.Struct({}))
 
 const PLANNING_AGENTS = new Set(["plan"])
+
+const RETRY_DELAYS_MS = [30_000, 120_000, 300_000]
+
+// Host canaries shorten the waits.
+const retryDelays = (raw: string | undefined) => {
+  const parsed = raw?.split(",").map(Number)
+  return parsed?.length === RETRY_LIMIT && parsed.every((ms) => Number.isFinite(ms) && ms >= 0)
+    ? parsed
+    : RETRY_DELAYS_MS
+}
 
 const KEY_PREFIX = "goal/"
 
@@ -113,6 +123,8 @@ export default Plugin.define({
   effect: (ctx) =>
     Effect.gen(function* () {
       const lock = yield* Semaphore.make(1)
+      const scope = yield* Effect.scope
+      const delays = retryDelays(process.env.GOAL_RETRY_DELAYS_MS)
       const { state, fresh } = locationState(ctx.location.directory)
       const { activity, agents, resumePending, closingSteps } = state
       const key = (sessionID: string) => `${KEY_PREFIX}${sessionID}`
@@ -156,6 +168,15 @@ export default Plugin.define({
 
       const steer = (sessionID: string, text: string) => send(sessionID, text, { resume: true, delivery: "steer" })
 
+      const scheduleRetry = (sessionID: string, attempt: number) =>
+        Effect.forkIn(
+          Effect.sleep(delays[attempt - 1]!).pipe(
+            Effect.andThen(onEvent(sessionID, { _tag: "RetryDue", attempt })),
+            Effect.catchCause((cause) => Effect.logError("goal: retry failed", cause)),
+          ),
+          scope,
+        ).pipe(Effect.asVoid)
+
       const perform = (sessionID: string, goal: Goal | undefined, effect: GoalEffect) => {
         switch (effect._tag) {
           case "None":
@@ -168,6 +189,9 @@ export default Plugin.define({
             return goal ? steer(sessionID, budgetLimitPrompt(goal, now())) : Effect.void
           case "ObjectiveUpdated":
             return goal ? steer(sessionID, objectiveUpdatedPrompt(goal, now())) : Effect.void
+          case "Retry":
+            return scheduleRetry(sessionID, effect.attempt)
+
         }
       }
 
@@ -345,7 +369,11 @@ export default Plugin.define({
           case "session.execution.interrupted":
             return onEvent(event.data.sessionID, { _tag: "Interrupted", reason: event.data.reason })
           case "session.execution.failed":
-            return onEvent(event.data.sessionID, { _tag: "Failed", message: event.data.error.message })
+            return onEvent(event.data.sessionID, {
+              _tag: "Failed",
+              message: event.data.error.message,
+              ...(event.data.error.status !== undefined && { status: event.data.error.status }),
+            })
           case "session.moved":
             return onEvent(event.data.sessionID, { _tag: "Moved", directory: event.data.location.directory })
           case "session.deleted":
@@ -355,23 +383,26 @@ export default Plugin.define({
         }
       }
 
-      const recover = Effect.gen(function* () {
-        let after: string | undefined
-        do {
-          const page = yield* ctx.storage.scan({ prefix: KEY_PREFIX, after, limit: 100 })
-          for (const entry of page.entries) {
-            const goal = decodeGoal(entry.value)
-            if (goal?.status === "active" && goal.directory === ctx.location.directory) {
-              yield* transition(entry.key.slice(KEY_PREFIX.length), { _tag: "Recovered" }, { quiet: true })
+      const forActiveGoals = (visit: (sessionID: string, goal: Goal) => Effect.Effect<unknown, unknown>) =>
+        Effect.gen(function* () {
+          let after: string | undefined
+          do {
+            const page = yield* ctx.storage.scan({ prefix: KEY_PREFIX, after, limit: 100 })
+            for (const entry of page.entries) {
+              const goal = decodeGoal(entry.value)
+              if (goal?.status === "active" && goal.directory === ctx.location.directory) {
+                yield* visit(entry.key.slice(KEY_PREFIX.length), goal)
+              }
             }
-          }
-          after = page.next
-        } while (after)
-      })
+            after = page.next
+          } while (after)
+        })
 
-      if (fresh) {
-        yield* recover.pipe(Effect.catchCause((cause) => Effect.logError("goal: recovery failed", cause)))
-      }
+      // A reload closes the previous scope and with it any pending retry wait.
+      const startup = fresh
+        ? forActiveGoals((sessionID) => transition(sessionID, { _tag: "Recovered" }, { quiet: true }))
+        : forActiveGoals((sessionID, goal) => (goal.failedTurns ? scheduleRetry(sessionID, goal.failedTurns) : Effect.void))
+      yield* startup.pipe(Effect.catchCause((cause) => Effect.logError("goal: recovery failed", cause)))
 
       yield* ctx.event.subscribe().pipe(
         Stream.runForEach((event) =>
