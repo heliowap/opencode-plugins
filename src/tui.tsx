@@ -3,7 +3,7 @@ import type { TextareaRenderable } from "@opentui/core"
 import { Plugin } from "@opencode/plugin/tui"
 import type { Context } from "@opencode/plugin/tui/context"
 import { editedObjective, goalBadge, objectiveLines, sidebarTitle, SPIN_INTERVAL_MS, type Tone } from "./badge.ts"
-import { budgetEvent, controlsFor, verifyEvent } from "./controls.ts"
+import { budgetEvent, controlsFor, dialogTitle, verifyEvent } from "./controls.ts"
 import { decodeGoal, type Goal, type GoalEvent } from "./goal.ts"
 import { GoalRpc } from "./rpc.ts"
 
@@ -95,12 +95,12 @@ export default Plugin.define({
     const openControls = async (sessionID: string) => {
       const goal = goalOf(sessionID)
       const controls = goal ? controlsFor(goal) : []
-      if (controls.length === 0) {
+      if (!goal || controls.length === 0) {
         context.ui.toast.show({ message: "This session has no unfinished goal.", variant: "info" })
         return
       }
       const id = await context.ui.dialog.select({
-        title: "Goal",
+        title: dialogTitle(goal),
         options: controls.map((control) => ({ title: control.title, value: control.id, description: control.description })),
       })
       const value = controls.find((control) => control.id === id)?.value

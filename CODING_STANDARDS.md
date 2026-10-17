@@ -5,7 +5,7 @@
 - `src/goal.ts` owns every state rule in the pure reducer `step(goal, event, now) -> { goal, effect }`. Add behavior as a new `GoalEvent` or `GoalEffect` variant and a reducer case. The reducer takes `now` as an argument and does no I/O.
 - `src/index.ts` is a thin adapter: it turns OpenCode events, the `/goal` command, and tool calls into `GoalEvent`s, then runs the returned `GoalEffect`. Every state change goes through `transition`, which holds the semaphore across load, step, save, and perform, and emits the `goal.changed` RPC event.
 - `src/tui.tsx` is the terminal entrypoint. It reads and edits the goal only through the `goal` RPC (`src/rpc.ts`) and renders `goalBadge` and `objectiveLines` from `src/badge.ts`. A bare `/goal edit` reaches it as the `editRequested` RPC event, because a terminal slash command named `goal` would take over every `/goal` command. Keep display rules in `badge.ts`, where unit and mutation tests reach them. Do not import `solid-js` in `tui.tsx`: an installed package gets its own copy, and its signals never reach the host renderer. Keep reactive state in `context.storage.memory`.
-- `src/command.ts` parses `/goal` arguments into a `GoalCommand` union. `src/prompts.ts` renders `templates/*.md` and formats status text.
+- `src/command.ts` parses `/goal` arguments into a `GoalCommand` union. `src/prompts.ts` renders `templates/*.md` and formats status text. `src/controls.ts` holds the pure rules for control ids, their availability, and their input-to-event mapping.
 - Model data as tagged unions with `_tag` and `switch` exhaustively. Persisted data is an Effect `Schema`, decoded with `decodeGoal` at the storage boundary.
 
 ## Effect and the plugin API

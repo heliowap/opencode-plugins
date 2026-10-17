@@ -63,7 +63,7 @@ describe("set and edit", () => {
     const limited = active({ status: "budget_limited", tokenBudget: 1_000, tokensUsed: 1_200 })
     expect(step(limited, { _tag: "Edit", objective: "x" }, T1)).toEqual({
       goal: limited,
-      effect: { _tag: "Refuse", text: "The goal has used its token budget. Set a new goal with a larger --tokens budget." },
+      effect: { _tag: "Refuse", text: "The goal has used its token budget. Raise the token budget to continue." },
     })
   })
 
@@ -138,15 +138,16 @@ describe("token budget", () => {
   })
 
   test.each(["paused", "blocked"] as const)("budget change keeps a %s goal's status", (status) => {
-    expect(step(active({ status, note: "keep" }), { _tag: "Budget", tokenBudget: 1_000 }, T1).goal).toEqual(
-      active({ status, note: "keep", tokenBudget: 1_000, updatedAt: T1 }),
-    )
+    expect(step(active({ status, note: "keep" }), { _tag: "Budget", tokenBudget: 1_000 }, T1)).toEqual({
+      goal: active({ status, note: "keep", tokenBudget: 1_000, updatedAt: T1 }),
+      effect: { _tag: "Notify", text: "Token budget updated." },
+    })
   })
 
   test("removing a budget notifies", () => {
-    expect(step(active({ tokenBudget: 1_000 }), { _tag: "Budget", tokenBudget: null }, T1).effect).toEqual({
-      _tag: "Notify",
-      text: "Token budget removed.",
+    expect(step(active({ tokenBudget: 1_000 }), { _tag: "Budget", tokenBudget: null }, T1)).toEqual({
+      goal: active({ updatedAt: T1 }),
+      effect: { _tag: "Notify", text: "Token budget removed." },
     })
   })
 
@@ -187,14 +188,20 @@ describe("token budget", () => {
     const limited = active({ status: "budget_limited", tokenBudget: 1_000, tokensUsed: 1_000 })
     expect(step(limited, { _tag: "Resume" }, T1)).toEqual({
       goal: limited,
-      effect: { _tag: "Refuse", text: "The goal has used its token budget. Set a new goal with a larger --tokens budget." },
+      effect: { _tag: "Refuse", text: "The goal has used its token budget. Raise the token budget to continue." },
     })
   })
 
   test("budget and verify refuse a complete goal", () => {
     const goal = active({ status: "complete" })
-    expect(step(goal, { _tag: "Budget", tokenBudget: 1_000 }, T1).effect).toEqual({ _tag: "Refuse", text: "The goal is complete. Set a new goal instead." })
-    expect(step(goal, { _tag: "Verify", verify: "bun test" }, T1).effect).toEqual({ _tag: "Refuse", text: "The goal is complete. Set a new goal instead." })
+    expect(step(goal, { _tag: "Budget", tokenBudget: 1_000 }, T1)).toEqual({
+      goal: active({ status: "complete" }),
+      effect: { _tag: "Refuse", text: "The goal is complete. Set a new goal instead." },
+    })
+    expect(step(goal, { _tag: "Verify", verify: "bun test" }, T1)).toEqual({
+      goal: active({ status: "complete" }),
+      effect: { _tag: "Refuse", text: "The goal is complete. Set a new goal instead." },
+    })
   })
 })
 
@@ -636,7 +643,7 @@ describe("a bare /goal edit (EditRequested)", () => {
     [
       "a goal out of budget",
       active({ status: "budget_limited", tokenBudget: 1_000, tokensUsed: 1_200 }),
-      "The goal has used its token budget. Set a new goal with a larger --tokens budget.",
+      "The goal has used its token budget. Raise the token budget to continue.",
     ],
   ])("refuses with %s", (_name, goal, text) => {
     expect(step(goal, { _tag: "EditRequested" }, T1)).toEqual({ goal, effect: { _tag: "Refuse", text } })

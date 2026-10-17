@@ -65,6 +65,17 @@ const click = (pattern: RegExp) => {
   type("-l", `\x1b[<0;${cell}M\x1b[<0;${cell}m`)
 }
 
+const sampledGlyphs = async (glyph: () => string | undefined) => {
+  const glyphs = new Set<string>()
+  const sampled = Date.now() + 1_500
+  while (Date.now() < sampled) {
+    const seen = glyph()
+    if (seen !== undefined) glyphs.add(seen)
+    await Bun.sleep(50)
+  }
+  return [...glyphs].sort()
+}
+
 const running = (usage: string) => new RegExp(`^[◐◓◑◒] goal running · ${usage}$`)
 
 describe.skipIf(!tmux && !process.env.CI)("status above the input in the terminal UI", () => {
@@ -80,15 +91,7 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       open(session)
 
       await shows(running("120 / 50K"))
-      const glyphs = new Set<string>()
-      const sampled = Date.now() + 1_500
-      while (Date.now() < sampled) {
-        const glyph = badgeLine().split(" ")[0]!
-        expect(["◐", "◓", "◑", "◒"]).toContain(glyph)
-        glyphs.add(glyph)
-        await Bun.sleep(50)
-      }
-      expect([...glyphs].sort()).toEqual(["◐", "◑", "◒", "◓"])
+      expect(await sampledGlyphs(() => badgeLine().split(" ")[0])).toEqual(["◐", "◑", "◒", "◓"])
       await shows(running("240 / 50K"))
       await host.goal(session, "pause")
       await shows("⏸ goal paused")
@@ -191,14 +194,7 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       open(session)
 
       await shows(running("120"))
-      const glyphs = new Set<string>()
-      const sampled = Date.now() + 1_500
-      while (Date.now() < sampled) {
-        const glyph = /([◐◓◑◒]) Goal/.exec(screen())?.[1]
-        if (glyph) glyphs.add(glyph)
-        await Bun.sleep(50)
-      }
-      expect([...glyphs].sort()).toEqual(["◐", "◑", "◒", "◓"])
+      expect(await sampledGlyphs(() => /([◐◓◑◒]) Goal/.exec(screen())?.[1])).toEqual(["◐", "◑", "◒", "◓"])
     },
     TIMEOUT,
   )
@@ -216,9 +212,30 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       await host.settle(session)
       open(session)
 
-      await sees(["open me from the sidebar"])
+      // The title moves while the layout is still drawing.
+      const title = /\bGoal\s*$/m
+      let lastSampledAt = 0
+      let titleRow: number | undefined
+      let stableSamples = 0
+      await waitFor(
+        () => {
+          const now = Date.now()
+          if (now - lastSampledAt < 500) return false
+          lastSampledAt = now
+          const row = screen().split("\n").findIndex((line) => title.test(line))
+          if (row < 0) {
+            titleRow = undefined
+            stableSamples = 0
+            return false
+          }
+          stableSamples = row === titleRow ? stableSamples + 1 : 1
+          titleRow = row
+          return stableSamples === 3
+        },
+        "the sidebar title never stayed on one row across three captures.",
+      )
       expect(screen()).not.toContain("Edit goal")
-      click(/\bGoal\b/)
+      click(title)
       await sees(["Edit goal", "open me from the sidebar"])
     },
     TIMEOUT,

@@ -93,16 +93,18 @@ const none: GoalEffect = { _tag: "None" }
 const notify = (text: string): GoalEffect => ({ _tag: "Notify", text })
 const refuse = (text: string): GoalEffect => ({ _tag: "Refuse", text })
 const RESET_STREAK = { failedTurns: undefined }
+const REACTIVATED = { status: "active", note: undefined, emptyTurns: 0, ...RESET_STREAK } as const
+const BUDGET_REACHED = { status: "budget_limited", note: "Token budget reached." } as const
 
 export const isUnfinished = (goal: Goal | undefined): goal is Goal => goal !== undefined && goal.status !== "complete"
 
-export const outOfBudget = (goal: Goal) => goal.tokenBudget !== null && goal.tokensUsed >= goal.tokenBudget
+const outOfBudget = (goal: Goal) => goal.tokenBudget !== null && goal.tokensUsed >= goal.tokenBudget
 
-export const COMPLETE_REFUSAL = "The goal is complete. Set a new goal instead."
+const COMPLETE_REFUSAL = "The goal is complete. Set a new goal instead."
 
-const resumeRefusal = (goal: Goal): string | undefined => {
+export const continueRefusal = (goal: Goal): string | undefined => {
   if (goal.status === "complete") return COMPLETE_REFUSAL
-  if (outOfBudget(goal)) return "The goal has used its token budget. Set a new goal with a larger --tokens budget."
+  if (outOfBudget(goal)) return "The goal has used its token budget. Raise the token budget to continue."
   return undefined
 }
 
@@ -157,10 +159,10 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
       if (goal.status === "complete") return { goal, effect: refuse(COMPLETE_REFUSAL) }
       const next = { ...goal, tokenBudget: event.tokenBudget }
       if (goal.status === "active" && outOfBudget(next)) {
-        return update({ tokenBudget: event.tokenBudget, status: "budget_limited", note: "Token budget reached." }, { _tag: "WrapUp" })
+        return update({ tokenBudget: event.tokenBudget, ...BUDGET_REACHED }, { _tag: "WrapUp" })
       }
       if (goal.status === "budget_limited" && !outOfBudget(next)) {
-        return update({ tokenBudget: event.tokenBudget, status: "active", note: undefined, emptyTurns: 0, ...RESET_STREAK }, { _tag: "Continue" })
+        return update({ tokenBudget: event.tokenBudget, ...REACTIVATED }, { _tag: "Continue" })
       }
       return update({ tokenBudget: event.tokenBudget }, notify(event.tokenBudget === null ? "Token budget removed." : "Token budget updated."))
     }
@@ -171,11 +173,11 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
         notify(event.verify === null ? "Verify command removed." : "Verify command updated."),
       )
     case "EditRequested": {
-      const refusal = resumeRefusal(goal)
+      const refusal = continueRefusal(goal)
       return { goal, effect: refusal ? refuse(refusal) : { _tag: "OpenEditor", objective: goal.objective } }
     }
     case "Edit": {
-      const refusal = resumeRefusal(goal)
+      const refusal = continueRefusal(goal)
       if (refusal) return { goal, effect: refuse(refusal) }
       if (goal.status === "active") {
         return update({ objective: event.objective, emptyTurns: 0, ...RESET_STREAK }, { _tag: "ObjectiveUpdated" })
@@ -193,9 +195,9 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
       return goal.status === "active" ? update({ status: "paused", note: event.note ?? "Paused at the user's request." }) : unchanged
     case "Resume": {
       if (goal.status === "active") return { goal, effect: refuse("The goal is already active.") }
-      const refusal = resumeRefusal(goal)
+      const refusal = continueRefusal(goal)
       if (refusal) return { goal, effect: refuse(refusal) }
-      return update({ status: "active", note: undefined, emptyTurns: 0, ...RESET_STREAK }, { _tag: "Continue" })
+      return update(REACTIVATED, { _tag: "Continue" })
     }
     case "Complete": {
       if (goal.status !== "active" && goal.status !== "budget_limited") return unchanged
@@ -210,7 +212,7 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
     case "Usage": {
       const charged = { ...goal, tokensUsed: goal.tokensUsed + event.tokens }
       const crossed = outOfBudget(charged)
-      const limited = { tokensUsed: charged.tokensUsed, status: "budget_limited", note: "Token budget reached." } as const
+      const limited = { tokensUsed: charged.tokensUsed, ...BUDGET_REACHED }
       switch (goal.status) {
         case "active":
           return crossed ? update(limited, { _tag: "WrapUp" }) : update({ tokensUsed: charged.tokensUsed })

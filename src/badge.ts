@@ -17,12 +17,14 @@ export const SPIN_INTERVAL_MS = 150
 
 const SPINNER = ["◐", "◓", "◑", "◒"]
 
-export const sidebarTitle = (running: boolean, frame: number): string => running ? `${SPINNER[frame % SPINNER.length]!} Goal` : "Goal"
+const spinnerGlyph = (frame: number) => SPINNER[frame % SPINNER.length]!
+
+export const sidebarTitle = (running: boolean, frame: number): string => running ? `${spinnerGlyph(frame)} Goal` : "Goal"
 
 const badges: Record<Status, (goal: Goal, running: boolean, frame: number) => Badge | undefined> = {
   active: (goal, running, frame) =>
     running
-      ? { text: `${SPINNER[frame % SPINNER.length]!} goal running · ${usage(goal)}`, tone: "accent" }
+      ? { text: `${spinnerGlyph(frame)} goal running · ${usage(goal)}`, tone: "accent" }
       : { text: `◎ goal active · ${usage(goal)}`, tone: "muted" },
   paused: () => ({ text: "⏸ goal paused", tone: "warning" }),
   blocked: () => ({ text: "⚠ goal blocked", tone: "error" }),

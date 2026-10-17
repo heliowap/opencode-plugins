@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { budgetEvent, controlsFor, type Control, verifyEvent } from "../src/controls.ts"
+import { budgetEvent, controlsFor, type Control, dialogTitle, verifyEvent } from "../src/controls.ts"
 import type { Goal } from "../src/goal.ts"
 
 const goal = (overrides: Partial<Goal> = {}): Goal => ({
@@ -43,6 +43,26 @@ test("paused and blocked controls omit pause and preserve the resume title", () 
   ]
   expect(controlsFor(goal({ status: "paused" }))).toEqual(expected)
   expect(controlsFor(goal({ status: "blocked" }))).toEqual(expected)
+})
+
+test.each([
+  ["budget_limited", goal({ status: "budget_limited", tokensUsed: 50_000 })],
+  ["blocked over budget", goal({ status: "blocked", tokensUsed: 50_000 })],
+] as const)("a %s goal offers only budget, verify, and clear", (_name, input) => {
+  expect(controlsFor(input)).toEqual([
+    { id: "budget", title: "Token budget", description: "50K of 50K", value: "50000" },
+    { id: "verify", title: "Verify command", description: "none", value: "" },
+    { id: "clear", title: "Clear goal" },
+  ])
+})
+
+test.each([
+  ["active", "Goal · active"],
+  ["paused", "Goal · paused"],
+  ["blocked", "Goal · blocked"],
+  ["budget_limited", "Goal · budget reached"],
+] as const)("dialogTitle for a %s goal", (status, expected) => {
+  expect(dialogTitle(goal({ status }))).toBe(expected)
 })
 
 test("unlimited budgets and configured verification show their values", () => {

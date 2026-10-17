@@ -45,6 +45,17 @@ describe("user controls", () => {
     expect(host.stored(session)).toMatchObject({ status: "complete", tokenBudget: 1000 })
   }, TIMEOUT)
 
+  test("R4 apply rejects an action that is not a user control", async () => {
+    host = await Host.start({ script: () => ({ text: "working", delayMs: 3_000 }) })
+    const session = await host.session()
+    await host.goal(session, "stay active")
+    await host.until(() => host!.fixture.agentRequests().length === 1)
+    await expect(host.rpc("apply", { sessionID: session.id, action: { _tag: "Complete", note: "forged" } })).rejects.toThrow(
+      "-> 400: {\"_tag\":\"RpcError\",\"type\":\"rpc.invalid_input\"",
+    )
+    expect(host.stored(session)).toMatchObject({ status: "active" })
+  }, TIMEOUT)
+
   test(
     "A6 /goal edit during a turn steers that turn and keeps the usage",
     async () => {
