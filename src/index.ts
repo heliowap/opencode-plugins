@@ -4,7 +4,7 @@ import { Effect, Schema, Semaphore, Stream } from "effect"
 import { spawn } from "node:child_process"
 import { parseCommand } from "./command.ts"
 import { formatTokens } from "./format.ts"
-import { decodeGoal, isUnfinished, step, type Check, type Goal, type GoalEffect, type GoalEvent } from "./goal.ts"
+import { decodeGoal, editRefusal, isUnfinished, step, type Check, type Goal, type GoalEffect, type GoalEvent } from "./goal.ts"
 import {
   budgetLimitPrompt,
   COMMAND_HELP,
@@ -124,6 +124,13 @@ export default Plugin.define({
       const rpc = yield* ctx.rpc
         .register(GoalRpc, {
           get: (input) => load((input as { sessionID: string }).sessionID).pipe(Effect.map((goal) => ({ goal: goal ?? null }))),
+          edit: (input) => {
+            const { sessionID, objective } = input as { sessionID: string; objective: string }
+            return transition(sessionID, { _tag: "Edit", objective }).pipe(
+              Effect.map(({ goal }) => ({ goal: goal ?? null })),
+              Effect.orDie,
+            )
+          },
         })
         .pipe(Effect.orDie)
 
@@ -164,7 +171,12 @@ export default Plugin.define({
         }
       }
 
-      const transition = (sessionID: string, event: GoalEvent, options: { readonly quiet?: boolean } = {}) =>
+      // Annotated because the goal.edit RPC handler and transition refer to each other.
+      const transition = (
+        sessionID: string,
+        event: GoalEvent,
+        options: { readonly quiet?: boolean } = {},
+      ): Effect.Effect<{ readonly before: Goal | undefined; readonly goal: Goal | undefined }, unknown> =>
         lock.withPermits(1)(
           Effect.gen(function* () {
             const before = yield* load(sessionID)
@@ -199,6 +211,15 @@ export default Plugin.define({
                 return notice(sessionID, command.message)
               case "Status":
                 return load(sessionID).pipe(Effect.flatMap((goal) => notice(sessionID, statusText(goal, now()))))
+              case "EditPrompt":
+                return load(sessionID).pipe(
+                  Effect.flatMap((goal) => {
+                    const refusal = editRefusal(goal)
+                    return refusal === undefined
+                      ? rpc.events.emit("editRequested", { sessionID, objective: goal!.objective })
+                      : notice(sessionID, refusal)
+                  }),
+                )
               case "Set":
                 return Effect.asVoid(transition(sessionID, { ...command, directory: ctx.location.directory }))
               case "Edit":

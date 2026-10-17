@@ -83,6 +83,11 @@ const resumeRefusal = (goal: Goal): string | undefined => {
   return undefined
 }
 
+const NO_GOAL = "No goal is set for this session."
+
+export const editRefusal = (goal: Goal | undefined): string | undefined =>
+  goal ? resumeRefusal(goal) : NO_GOAL
+
 export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Step => {
   const unchanged: Step = { goal, effect: none }
   const update = (patch: Partial<Goal>, effect: GoalEffect = none): Step => ({
@@ -108,7 +113,7 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
   }
   if (!goal) {
     return event._tag === "Pause" || event._tag === "Resume" || event._tag === "Clear" || event._tag === "Edit"
-      ? { goal, effect: notify("No goal is set for this session.") }
+      ? { goal, effect: notify(NO_GOAL) }
       : unchanged
   }
 
@@ -120,9 +125,9 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
     case "Clear":
       return { goal: undefined, effect: notify("Goal cleared.") }
     case "Edit": {
-      if (goal.status === "active") return update({ objective: event.objective, emptyTurns: 0 }, { _tag: "ObjectiveUpdated" })
-      const refusal = resumeRefusal(goal)
+      const refusal = editRefusal(goal)
       if (refusal) return { goal, effect: notify(refusal) }
+      if (goal.status === "active") return update({ objective: event.objective, emptyTurns: 0 }, { _tag: "ObjectiveUpdated" })
       return update(
         { objective: event.objective },
         notify(`Objective updated. The goal is ${goal.status}; run /goal resume to continue.`),

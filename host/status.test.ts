@@ -47,4 +47,41 @@ describe("status for the terminal", () => {
     },
     TIMEOUT,
   )
+
+  test(
+    "A17 a bare /goal edit hands the full objective to the terminal, and goal.edit saves the new one",
+    async () => {
+      host = await Host.start({ script: () => ({ text: "Step." }) })
+      const empty = await host.session()
+      const refused = host.events((type) => type === "rpc.goal.editRequested")
+      await Bun.sleep(500)
+      await host.goal(empty, "edit")
+      await host.until(async () => (await host!.inbox(empty)).includes("[goal] No goal is set for this session."))
+      refused.stop()
+      expect(refused.seen).toEqual([])
+
+      const session = await host.session()
+      const objective = "make the checkout suite pass\n\nwithout changing the public API"
+      await host.goal(session, objective)
+      await host.goal(session, "pause")
+      await host.settle(session)
+      expect(host.stored(session)).toMatchObject({ objective, status: "paused" })
+
+      const requested = host.events((type) => type === "rpc.goal.editRequested")
+      await Bun.sleep(500)
+      await host.goal(session, "edit")
+      await host.until(() => requested.seen.length > 0)
+      requested.stop()
+      expect(requested.seen.map((event) => event.data)).toEqual([{ sessionID: session.id, objective }])
+
+      const saved = (await host.rpc("edit", { sessionID: session.id, objective: "only the login test" })) as { goal: unknown }
+      const stored = host.stored(session)
+      expect(stored).toMatchObject({ objective: "only the login test", status: "paused" })
+      expect(saved).toEqual({ goal: stored })
+      await host.until(async () =>
+        (await host!.inbox(session)).includes("[goal] Objective updated. The goal is paused; run /goal resume to continue."),
+      )
+    },
+    TIMEOUT,
+  )
 })
