@@ -343,22 +343,40 @@ describe("interruptions and failures", () => {
 
   test("a non-server error after retries blocks with the retry count", () => {
     expect(step(active({ failedTurns: 1 }), { _tag: "Failed", message: "bad request", status: 400 }, T1).goal).toEqual(
-      active({ status: "blocked", failedTurns: 1, note: "Turn failed after 1 retries: bad request", updatedAt: T1 }),
+      active({ status: "blocked", failedTurns: 1, note: "Turn failed after 1 retry: bad request", updatedAt: T1 }),
     )
   })
 
-  test("a due retry continues an active goal", () => {
-    const goal = active({ failedTurns: 1 })
-    expect(step(goal, { _tag: "RetryDue" }, T1)).toEqual({ goal, effect: { _tag: "Continue" } })
+  test("a due retry continues an active goal still on that attempt", () => {
+    const goal = active({ failedTurns: 2 })
+    expect(step(goal, { _tag: "RetryDue", attempt: 2 }, T1)).toEqual({ goal, effect: { _tag: "Continue" } })
+  })
+
+  test.each([
+    ["a later attempt", active({ failedTurns: 3 })],
+    ["a streak reset by a turn, a resume, or a new goal", active()],
+  ])("a stale retry does nothing after %s", (_name, goal) => {
+    expect(step(goal, { _tag: "RetryDue", attempt: 2 }, T1)).toEqual({ goal, effect: { _tag: "None" } })
   })
 
   test.each(["paused", "blocked", "complete", "budget_limited"] as const)("a due retry does nothing to a %s goal", (status) => {
     const goal = active({ status, failedTurns: 1 })
-    expect(step(goal, { _tag: "RetryDue" }, T1)).toEqual({ goal, effect: { _tag: "None" } })
+    expect(step(goal, { _tag: "RetryDue", attempt: 1 }, T1)).toEqual({ goal, effect: { _tag: "None" } })
   })
 
   test("a due retry does nothing without a goal", () => {
-    expect(step(undefined, { _tag: "RetryDue" }, T1)).toEqual({ goal: undefined, effect: { _tag: "None" } })
+    expect(step(undefined, { _tag: "RetryDue", attempt: 1 }, T1)).toEqual({ goal: undefined, effect: { _tag: "None" } })
+  })
+
+  test("completing the goal clears the failure streak", () => {
+    expect(step(active({ failedTurns: 1 }), { _tag: "Complete", note: "done" }, T1).goal).toEqual(
+      active({ status: "complete", note: "done", updatedAt: T1 }),
+    )
+  })
+
+  test("a planning turn leaves the failure streak alone", () => {
+    const goal = active({ failedTurns: 1 })
+    expect(step(goal, turn(true, true), T1)).toEqual({ goal, effect: { _tag: "None" } })
   })
 
   test("a turn that ends clears the failure streak", () => {

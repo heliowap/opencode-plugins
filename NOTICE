@@ -12,5 +12,5 @@ Adapted files:
 
 Changes: tool names and wording were changed to match OpenCode
 (goal_update, todowrite, "session" instead of "thread"), and the
-completion note field and the optional verification section were
-added.
+completion note field, the optional verification section, and the
+definitions of each goal status were added.

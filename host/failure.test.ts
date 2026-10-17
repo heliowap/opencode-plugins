@@ -48,7 +48,8 @@ describe("failures", () => {
       await host.until(() => host!.stored(session)?.status === "complete", 60_000)
       await host.settle(session)
 
-      expect(host.stored(session)).toMatchObject({ status: "complete", note: "done", failedTurns: 1 })
+      expect(host.stored(session)).toMatchObject({ status: "complete", note: "done" })
+      expect(host.stored(session)?.failedTurns).toBeUndefined()
       expect(host.fixture.agentRequests()).toHaveLength(3)
     },
     TIMEOUT,
@@ -72,6 +73,54 @@ describe("failures", () => {
       expect(stored.note).toStartWith("Turn failed after 3 retries: ")
       expect(stored.note).toContain("upstream unavailable")
       expect(host.fixture.agentRequests()).toHaveLength(4)
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "A8d pausing during the retry wait cancels the retry",
+    async () => {
+      host = await Host.start({
+        noHostRetry: true,
+        env: { GOAL_RETRY_DELAYS_MS: "3000,3000,3000" },
+        script: () => ({ status: 503, error: "upstream unavailable" }),
+      })
+      const session = await host.session()
+      await host.goal(session, "wait out an outage")
+      await host.until(() => host!.stored(session)?.failedTurns === 1)
+      await host.goal(session, "pause")
+      await Bun.sleep(5_000)
+      await host.settle(session)
+
+      expect(host.stored(session)).toMatchObject({ status: "paused", failedTurns: 1 })
+      expect(host.fixture.agentRequests()).toHaveLength(1)
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "A8e a location reload during the retry wait still retries",
+    async () => {
+      let failures = 0
+      host = await Host.start({
+        noHostRetry: true,
+        env: { GOAL_RETRY_DELAYS_MS: "3000,3000,3000" },
+        script: (request) => {
+          if (failures === 0) {
+            failures++
+            return { status: 503, error: "upstream unavailable" }
+          }
+          return afterToolResult(request) ? { text: "Done." } : { tool: "goal_update", args: { status: "complete", note: "done" } }
+        },
+      })
+      const session = await host.session()
+      await host.goal(session, "outlive a reload while waiting")
+      await host.until(() => host!.stored(session)?.failedTurns === 1)
+      await host.json("POST", "/api/location/reload")
+      await host.until(() => host!.stored(session)?.status === "complete", 60_000)
+      await host.settle(session)
+
+      expect(host.fixture.agentRequests()).toHaveLength(3)
     },
     TIMEOUT,
   )

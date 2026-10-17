@@ -56,7 +56,7 @@ export type GoalEvent =
   | { readonly _tag: "TurnEnded"; readonly activity: boolean; readonly planning: boolean }
   | { readonly _tag: "Interrupted"; readonly reason: "user" | "shutdown" | "superseded" | "inactivity" }
   | { readonly _tag: "Failed"; readonly message: string; readonly status?: number }
-  | { readonly _tag: "RetryDue" }
+  | { readonly _tag: "RetryDue"; readonly attempt: number }
   | { readonly _tag: "Recovered" }
 
 export interface Check {
@@ -154,10 +154,10 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
     }
     case "Complete": {
       if (goal.status !== "active" && goal.status !== "budget_limited") return unchanged
-      if (goal.verify === undefined) return update({ status: "complete", note: event.note })
+      if (goal.verify === undefined) return update({ status: "complete", note: event.note, failedTurns: undefined })
       if (event.check?.command !== goal.verify) return unchanged
       return event.check.exitCode === 0
-        ? update({ status: "complete", note: event.note, lastExitCode: 0 })
+        ? update({ status: "complete", note: event.note, lastExitCode: 0, failedTurns: undefined })
         : update({ verifyFailures: (goal.verifyFailures ?? 0) + 1, lastExitCode: event.check.exitCode })
     }
     case "Block":
@@ -193,22 +193,16 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
       if (serverError(event.status) && failed < RETRY_LIMIT) {
         return update({ failedTurns: failed + 1 }, { _tag: "Retry", attempt: failed + 1 })
       }
-      const retries = failed ? ` after ${failed} retries` : ""
+      const retries = failed ? ` after ${failed} ${failed === 1 ? "retry" : "retries"}` : ""
       return update({ status: "blocked", note: `Turn failed${retries}: ${event.message}` })
     }
     case "RetryDue":
-      return goal.status === "active" ? { goal, effect: { _tag: "Continue" } } : unchanged
+      return goal.status === "active" && goal.failedTurns === event.attempt ? { goal, effect: { _tag: "Continue" } } : unchanged
     case "TurnEnded": {
       if (goal.status !== "active" || event.planning) return unchanged
-      if (event.activity) return update({ emptyTurns: 0, failedTurns: undefined }, { _tag: "Continue" })
-      const emptyTurns = goal.emptyTurns + 1
+      const emptyTurns = event.activity ? 0 : goal.emptyTurns + 1
       return emptyTurns >= EMPTY_TURN_LIMIT
-        ? update({
-            emptyTurns,
-            failedTurns: undefined,
-            status: "blocked",
-            note: `${EMPTY_TURN_LIMIT} consecutive turns produced no output.`,
-          })
+        ? update({ emptyTurns, failedTurns: undefined, status: "blocked", note: `${EMPTY_TURN_LIMIT} consecutive turns produced no output.` })
         : update({ emptyTurns, failedTurns: undefined }, { _tag: "Continue" })
     }
   }

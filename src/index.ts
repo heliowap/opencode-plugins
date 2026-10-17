@@ -4,7 +4,7 @@ import { Effect, Schema, Semaphore, Stream } from "effect"
 import { spawn } from "node:child_process"
 import { parseCommand } from "./command.ts"
 import { formatTokens } from "./format.ts"
-import { decodeGoal, editRefusal, isUnfinished, step, type Check, type Goal, type GoalEffect, type GoalEvent } from "./goal.ts"
+import { decodeGoal, editRefusal, isUnfinished, RETRY_LIMIT, step, type Check, type Goal, type GoalEffect, type GoalEvent } from "./goal.ts"
 import {
   budgetLimitPrompt,
   COMMAND_HELP,
@@ -55,10 +55,10 @@ const PLANNING_AGENTS = new Set(["plan"])
 
 const RETRY_DELAYS_MS = [30_000, 120_000, 300_000]
 
-// Host canaries shorten the waits; a value that does not parse keeps the defaults.
+// Host canaries shorten the waits.
 const retryDelays = (raw: string | undefined) => {
   const parsed = raw?.split(",").map(Number)
-  return parsed?.length === RETRY_DELAYS_MS.length && parsed.every((ms) => Number.isFinite(ms) && ms >= 0)
+  return parsed?.length === RETRY_LIMIT && parsed.every((ms) => Number.isFinite(ms) && ms >= 0)
     ? parsed
     : RETRY_DELAYS_MS
 }
@@ -168,6 +168,15 @@ export default Plugin.define({
 
       const steer = (sessionID: string, text: string) => send(sessionID, text, { resume: true, delivery: "steer" })
 
+      const scheduleRetry = (sessionID: string, attempt: number) =>
+        Effect.forkIn(
+          Effect.sleep(delays[attempt - 1]!).pipe(
+            Effect.andThen(onEvent(sessionID, { _tag: "RetryDue", attempt })),
+            Effect.catchCause((cause) => Effect.logError("goal: retry failed", cause)),
+          ),
+          scope,
+        ).pipe(Effect.asVoid)
+
       const perform = (sessionID: string, goal: Goal | undefined, effect: GoalEffect) => {
         switch (effect._tag) {
           case "None":
@@ -180,15 +189,9 @@ export default Plugin.define({
             return goal ? steer(sessionID, budgetLimitPrompt(goal, now())) : Effect.void
           case "ObjectiveUpdated":
             return goal ? steer(sessionID, objectiveUpdatedPrompt(goal, now())) : Effect.void
-          // A notice here would start a turn at once and skip the wait.
           case "Retry":
-            return Effect.forkIn(
-              Effect.sleep(delays[effect.attempt - 1]!).pipe(
-                Effect.andThen(onEvent(sessionID, { _tag: "RetryDue" })),
-                Effect.catchCause((cause) => Effect.logError("goal: retry failed", cause)),
-              ),
-              scope,
-            ).pipe(Effect.asVoid)
+            return scheduleRetry(sessionID, effect.attempt)
+
         }
       }
 
@@ -380,23 +383,26 @@ export default Plugin.define({
         }
       }
 
-      const recover = Effect.gen(function* () {
-        let after: string | undefined
-        do {
-          const page = yield* ctx.storage.scan({ prefix: KEY_PREFIX, after, limit: 100 })
-          for (const entry of page.entries) {
-            const goal = decodeGoal(entry.value)
-            if (goal?.status === "active" && goal.directory === ctx.location.directory) {
-              yield* transition(entry.key.slice(KEY_PREFIX.length), { _tag: "Recovered" }, { quiet: true })
+      const forActiveGoals = (visit: (sessionID: string, goal: Goal) => Effect.Effect<unknown, unknown>) =>
+        Effect.gen(function* () {
+          let after: string | undefined
+          do {
+            const page = yield* ctx.storage.scan({ prefix: KEY_PREFIX, after, limit: 100 })
+            for (const entry of page.entries) {
+              const goal = decodeGoal(entry.value)
+              if (goal?.status === "active" && goal.directory === ctx.location.directory) {
+                yield* visit(entry.key.slice(KEY_PREFIX.length), goal)
+              }
             }
-          }
-          after = page.next
-        } while (after)
-      })
+            after = page.next
+          } while (after)
+        })
 
-      if (fresh) {
-        yield* recover.pipe(Effect.catchCause((cause) => Effect.logError("goal: recovery failed", cause)))
-      }
+      // A reload closes the previous scope and with it any pending retry wait.
+      const startup = fresh
+        ? forActiveGoals((sessionID) => transition(sessionID, { _tag: "Recovered" }, { quiet: true }))
+        : forActiveGoals((sessionID, goal) => (goal.failedTurns ? scheduleRetry(sessionID, goal.failedTurns) : Effect.void))
+      yield* startup.pipe(Effect.catchCause((cause) => Effect.logError("goal: recovery failed", cause)))
 
       yield* ctx.event.subscribe().pipe(
         Stream.runForEach((event) =>

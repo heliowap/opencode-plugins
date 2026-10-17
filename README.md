@@ -19,7 +19,7 @@ This installs the plugin and adds it to your global `opencode.jsonc`. If `/goal`
 
 | Surface | Status |
 |---|---|
-| OpenCode 2.0.24 | Verified by 29 host canaries against a real `opencode serve`, graded on stored state. They run in CI on every push. |
+| OpenCode 2.0.24 | Verified by 31 host canaries against a real `opencode serve`, graded on stored state. They run in CI on every push. |
 | Status above the input, objective in the sidebar, `/goal edit` editor (terminal UI) | Verified by 3 canaries that drive the real `opencode` terminal in tmux and read the screen |
 | Headless `opencode run` | Works against a running server (`--server` or the background service). With `--standalone` the goal stops after the first turn, see [Headless runs](#headless-runs) |
 | Live models | `devin/swe-2`, `gemini-3.8-flash`, and the free `nemotron-3.5-lightning-free` complete real goals, stop at budgets, and survive a restart |
