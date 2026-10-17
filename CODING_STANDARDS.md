@@ -19,7 +19,7 @@
 - Per-turn bookkeeping (`activity`, `agents`, `resumePending`, `closingSteps`) lives in the per-location `LocationState` on `globalThis`, so a plugin reload keeps turns in flight. Recovery after a restart runs only when that state is fresh.
 - `goal_update` with `complete` runs the user's `--verify` command before `transition`, outside the semaphore, and passes the result to `step` as `Complete.check`. The reducer accepts the check only for the goal's current command.
 - A `Retry` effect forks a sleep into the plugin scope, then sends `RetryDue` with its attempt through `transition`; the reducer drops a `RetryDue` whose attempt no longer matches `failedTurns`. It sends no notice, because a queued notice starts a turn at once. A location reload reschedules pending waits. `GOAL_RETRY_DELAYS_MS` exists only so host canaries can shorten the waits.
-- `src/trace.ts` builds the trace log records as pure functions, `src/log.ts` appends them with `appendCapped`, and `src/report.ts` summarizes them for `bun run report`. Every `transition`, typed `/goal`, failed `goal_*` tool call, and caught handler failure writes one record through `trace`, which swallows write errors so the log can never fail a goal.
+- `src/trace.ts` builds the trace log records as pure functions, `src/log.ts` appends them with `appendCapped`, and `src/report.ts` summarizes them for `bun run report`. Records are a tagged union, `TraceRecord`. Every `transition`, typed `/goal`, failed `goal_*` tool call, and caught handler failure writes one record through `trace`, which swallows write errors so the log can never fail a goal.
 - Storage changes go through `transition` too, including deletion: a deleted session is a quiet `Clear`.
 
 ## Persistence

@@ -3,6 +3,8 @@ import { dirname, join } from "node:path"
 
 export const LOG_LIMIT = 200 * 1024 * 1024
 
+export const rotatedPath = (path: string) => path.replace(/\.jsonl$/, ".1.jsonl")
+
 export const logPath = (env: Readonly<Record<string, string | undefined>>, home: string) =>
   join(env.XDG_DATA_HOME ?? join(home, ".local", "share"), "opencode", "log", "goal.jsonl")
 
@@ -21,6 +23,6 @@ export const appendCapped = (path: string, line: string, limit: number) => {
   const half = Math.floor(limit / 2)
   if (bytes > half) return
   mkdirSync(dirname(path), { recursive: true })
-  if (size(path) + bytes > half) renameSync(path, path.replace(/\.jsonl$/, ".1.jsonl"))
+  if (size(path) + bytes > half) renameSync(path, rotatedPath(path))
   appendFileSync(path, entry)
 }

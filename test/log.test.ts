@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { appendCapped, logPath } from "../src/log.ts"
+import { appendCapped, logPath, rotatedPath } from "../src/log.ts"
 
 let dir: string | undefined
 
@@ -40,6 +40,10 @@ test("a line over half the limit is dropped instead of breaking the cap", () => 
   const path = join(temp(), "goal.jsonl")
   appendCapped(path, "x".repeat(30), 40)
   expect(existsSync(path)).toBe(false)
+})
+
+test("rotatedPath names the older file", () => {
+  expect(rotatedPath("/data/goal.jsonl")).toBe("/data/goal.1.jsonl")
 })
 
 test("logPath sits next to opencode.log in the data directory", () => {

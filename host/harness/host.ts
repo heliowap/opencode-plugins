@@ -15,6 +15,7 @@ export interface HostOptions {
   readonly providers?: Record<string, unknown>
   readonly allowAll?: boolean
   readonly noHostRetry?: boolean
+  readonly pluginOptions?: Record<string, unknown>
   readonly env?: Record<string, string>
 }
 
@@ -68,10 +69,11 @@ export class Host {
           ...options.providers,
         },
         ...(options.pluginSpec && { plugins: [options.pluginSpec] }),
+        ...(options.pluginOptions && { plugins: [{ package: `file://${join(REPO, "src")}`, options: options.pluginOptions }] }),
         ...(options.allowAll && { permissions: [{ action: "*", resource: "*", effect: "allow" }] }),
       }),
     )
-    if (!options.pluginSpec) {
+    if (!options.pluginSpec && !options.pluginOptions) {
       await mkdir(join(config, "plugins"), { recursive: true })
       await symlink(join(REPO, "src"), join(config, "plugins", "goal"))
     }

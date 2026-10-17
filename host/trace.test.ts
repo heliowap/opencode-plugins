@@ -42,21 +42,21 @@ describe("trace log", () => {
       const own = records(host).filter((record) => record.sessionID === session.id)
       expect(own.map(({ at: _at, ...rest }) => rest)).toEqual([
         {
-          kind: "command",
+          _tag: "Command",
           sessionID: session.id,
           text: "--tokens nope go",
           result: "Invalid",
           message: '--tokens needs a positive number such as 50000, 250K or 1.5M, got "nope".',
         },
-        { kind: "command", sessionID: session.id, text: "trace me", result: "Set" },
-        { kind: "transition", sessionID: session.id, event: "Set", from: "none", to: "active", effect: "Continue", tokensUsed: 0, objective: "trace me" },
+        { _tag: "Command", sessionID: session.id, text: "trace me", result: "Set" },
+        { _tag: "Transition", sessionID: session.id, event: "Set", from: "none", to: "active", effect: "Continue", tokensUsed: 0, objective: "trace me" },
         {
-          kind: "tool_error",
+          _tag: "ToolError",
           sessionID: session.id,
           tool: "goal_create",
           message: "This session already has an unfinished goal (active). Finish it, or ask the user to replace it with /goal <objective>.",
         },
-        { kind: "transition", sessionID: session.id, event: "Complete", from: "active", to: "complete", effect: "None", tokensUsed: 240, note: "done" },
+        { _tag: "Transition", sessionID: session.id, event: "Complete", from: "active", to: "complete", effect: "None", tokensUsed: 240, note: "done" },
       ])
     },
     TIMEOUT,
@@ -73,6 +73,35 @@ describe("trace log", () => {
       await host.settle(session)
 
       expect(existsSync(logFile(host))).toBe(false)
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "L3 the plugin option log: false writes no log",
+    async () => {
+      host = await Host.start({ script, pluginOptions: { log: false } })
+      const session = await host.session()
+      await host.goal(session, "--tokens nope go")
+      await host.goal(session, "trace me")
+      await host.until(() => host!.stored(session)?.status === "complete")
+      await host.settle(session)
+
+      expect(existsSync(logFile(host))).toBe(false)
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "L4 the same package spec without options writes the log",
+    async () => {
+      host = await Host.start({ script, pluginOptions: {} })
+      const session = await host.session()
+      await host.goal(session, "trace me")
+      await host.until(() => host!.stored(session)?.status === "complete")
+      await host.settle(session)
+
+      expect(existsSync(logFile(host))).toBe(true)
     },
     TIMEOUT,
   )

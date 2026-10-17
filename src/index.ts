@@ -118,6 +118,11 @@ const runCheck = (command: string, directory: string) =>
     })
   })
 
+const eventSession = (event: { readonly data?: unknown }) => {
+  const sessionID = (event.data as { readonly sessionID?: unknown } | undefined)?.sessionID
+  return typeof sessionID === "string" ? sessionID : undefined
+}
+
 const toolError = (error: unknown) =>
   error instanceof Tool.Error ? error : new Tool.Error({ message: `goal: ${String(error)}` })
 
@@ -141,8 +146,10 @@ export default Plugin.define({
             })
           : Effect.void
 
-      const failure = (where: string) => (cause: Cause.Cause<unknown>) =>
-        Effect.logError(`goal: ${where} failed`, cause).pipe(Effect.andThen(trace(errorRecord(where, Cause.pretty(cause), now()))))
+      const failure = (where: string, sessionID?: string) => (cause: Cause.Cause<unknown>) =>
+        Effect.logError(`goal: ${where} failed`, cause).pipe(
+          Effect.andThen(trace(errorRecord(where, Cause.pretty(cause), sessionID, now()))),
+        )
       const { state, fresh } = locationState(ctx.location.directory)
       const { activity, agents, resumePending, closingSteps } = state
       const key = (sessionID: string) => `${KEY_PREFIX}${sessionID}`
@@ -190,7 +197,7 @@ export default Plugin.define({
         Effect.forkIn(
           Effect.sleep(delays[attempt - 1]!).pipe(
             Effect.andThen(onEvent(sessionID, { _tag: "RetryDue", attempt })),
-            Effect.catchCause(failure("retry")),
+            Effect.catchCause(failure("retry", sessionID)),
           ),
           scope,
         ).pipe(Effect.asVoid)
@@ -228,7 +235,7 @@ export default Plugin.define({
               yield* save(sessionID, next.goal)
               yield* rpc.events
                 .emit("changed", { sessionID, goal: next.goal ?? null })
-                .pipe(Effect.catchCause(failure("changed event")))
+                .pipe(Effect.catchCause(failure("changed event", sessionID)))
             }
             if (!options.quiet) yield* perform(sessionID, next.goal, next.effect)
             return { before, goal: next.goal }
@@ -317,6 +324,8 @@ export default Plugin.define({
           execute: (_input, context) =>
             load(context.sessionID).pipe(
               Effect.map((goal) => ({ content: `${statusText(goal, now())}\n\n${COMMAND_HELP}` })),
+              Effect.mapError(toolError),
+              Effect.tapError((error) => trace(toolErrorRecord(context.sessionID, "goal_get", error.message, now()))),
             ),
         })
         editor.add({
@@ -435,7 +444,7 @@ export default Plugin.define({
 
       yield* ctx.event.subscribe().pipe(
         Stream.runForEach((event) =>
-          handle(event).pipe(Effect.catchCause(failure(event.type))),
+          handle(event).pipe(Effect.catchCause(failure(event.type, eventSession(event)))),
         ),
         Effect.catchCause(failure("event stream")),
         Effect.forkScoped,
