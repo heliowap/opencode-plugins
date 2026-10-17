@@ -228,7 +228,7 @@ export default Plugin.define({
         }
       }
 
-      // Annotated because the goal.edit RPC handler and transition refer to each other.
+      // Annotated because the goal.apply RPC handler and transition refer to each other.
       const transition = (
         sessionID: string,
         event: GoalEvent,

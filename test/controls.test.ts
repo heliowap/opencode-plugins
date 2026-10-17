@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { budgetEvent, controlsFor, type Control, dialogTitle, verifyEvent } from "../src/controls.ts"
+import { budgetEvent, controlEvent, controlsFor, verifyEvent } from "../src/controls.ts"
 import type { Goal } from "../src/goal.ts"
 
 const goal = (overrides: Partial<Goal> = {}): Goal => ({
@@ -34,13 +34,13 @@ test.each([
 })
 
 test("paused and blocked controls omit pause and preserve the resume title", () => {
-  const expected: readonly Control[] = [
+  const expected = [
     { id: "resume", title: "Resume goal" },
     { id: "edit", title: "Edit objective" },
     { id: "budget", title: "Token budget", description: "12K of 50K", value: "50000" },
     { id: "verify", title: "Verify command", description: "none", value: "" },
     { id: "clear", title: "Clear goal" },
-  ]
+  ] as const
   expect(controlsFor(goal({ status: "paused" }))).toEqual(expected)
   expect(controlsFor(goal({ status: "blocked" }))).toEqual(expected)
 })
@@ -54,15 +54,6 @@ test.each([
     { id: "verify", title: "Verify command", description: "none", value: "" },
     { id: "clear", title: "Clear goal" },
   ])
-})
-
-test.each([
-  ["active", "Goal · active"],
-  ["paused", "Goal · paused"],
-  ["blocked", "Goal · blocked"],
-  ["budget_limited", "Goal · budget reached"],
-] as const)("dialogTitle for a %s goal", (status, expected) => {
-  expect(dialogTitle(goal({ status }))).toBe(expected)
 })
 
 test("unlimited budgets and configured verification show their values", () => {
@@ -91,4 +82,19 @@ test.each([
   ["", { _tag: "Verify", verify: null }],
 ] as const)("verifyEvent trims %j", (text, expected) => {
   expect(verifyEvent(text)).toEqual(expected)
+})
+
+test.each([
+  ["pause", { _tag: "Pause" }],
+  ["resume", { _tag: "Resume" }],
+  ["edit", { _tag: "EditRequested" }],
+  ["clear", { _tag: "Clear" }],
+  ["budget", undefined],
+  ["verify", undefined],
+] as const)("controlEvent maps %s", (id, expected) => {
+  expect(controlEvent(id)).toEqual(expected)
+})
+
+test("controlEvent rejects an unknown id", () => {
+  expect(() => controlEvent("unknown" as never)).toThrow("unknown")
 })

@@ -2,9 +2,9 @@ import { parseTokens } from "./command.ts"
 import { formatTokens } from "./format.ts"
 import { continueRefusal, type Goal, type GoalEvent } from "./goal.ts"
 
-export type ControlID = "pause" | "resume" | "edit" | "budget" | "verify" | "clear"
+type ControlID = "pause" | "resume" | "edit" | "budget" | "verify" | "clear"
 
-export interface Control {
+interface Control {
   readonly id: ControlID
   readonly title: string
   readonly description?: string
@@ -13,11 +13,11 @@ export interface Control {
 
 export const controlsFor = (goal: Goal): readonly Control[] => {
   if (goal.status === "complete") return []
-  const open = continueRefusal(goal) === undefined
+  const continuable = continueRefusal(goal) === undefined
   const controls: Control[] = []
   if (goal.status === "active") controls.push({ id: "pause", title: "Pause goal" })
-  if ((goal.status === "paused" || goal.status === "blocked") && open) controls.push({ id: "resume", title: "Resume goal" })
-  if (open) controls.push({ id: "edit", title: "Edit objective" })
+  if ((goal.status === "paused" || goal.status === "blocked") && continuable) controls.push({ id: "resume", title: "Resume goal" })
+  if (continuable) controls.push({ id: "edit", title: "Edit objective" })
   controls.push({
     id: "budget",
     title: "Token budget",
@@ -29,7 +29,16 @@ export const controlsFor = (goal: Goal): readonly Control[] => {
   return controls
 }
 
-export const dialogTitle = (goal: Goal): string => `Goal · ${goal.status === "budget_limited" ? "budget reached" : goal.status}`
+export const controlEvent = (id: ControlID): GoalEvent | undefined => {
+  if (id === "budget" || id === "verify") return undefined
+  switch (id) {
+    case "pause": return { _tag: "Pause" }
+    case "resume": return { _tag: "Resume" }
+    case "edit": return { _tag: "EditRequested" }
+    case "clear": return { _tag: "Clear" }
+  }
+  throw new Error(id)
+}
 
 export const budgetEvent = (text: string): GoalEvent | undefined => {
   const trimmed = text.trim()

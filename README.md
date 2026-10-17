@@ -20,7 +20,7 @@ This installs the plugin and adds it to your global `opencode.jsonc`. If `/goal`
 | Surface | Status |
 |---|---|
 | OpenCode 2.0.24 | Verified by 39 host canaries against a real `opencode serve`, graded on stored state. They run in CI on every push. |
-| Status above the input, objective in the sidebar, `/goal edit` editor, goal controls (terminal UI) | Verified by 8 canaries on OpenCode 2.0.24, the version CI pins, that drive the real `opencode` terminal in tmux, with keys and mouse clicks, and read the screen |
+| Status above the input, objective in the sidebar, `/goal edit` editor, and terminal UI controls for token budget, pause, and clear | Verified by 8 canaries on OpenCode 2.0.24, the version CI pins, that drive the real `opencode` terminal in tmux, with keys and mouse clicks, and read the screen. The reducer and RPC tests cover the other controls. |
 | Headless `opencode run` | Works against a running server (`--server` or the background service). With `--standalone` the goal stops after the first turn, see [Headless runs](#headless-runs) |
 | Live models | `devin/swe-2`, `gemini-3.8-flash`, and the free `nemotron-3.5-lightning-free` complete real goals, stop at budgets, and survive a restart |
 | `/goal` typed in the terminal UI | `/goal edit` is typed in the real terminal by a canary; the other subcommands are not established there, but the goal controls cover pause, budget, and clear |

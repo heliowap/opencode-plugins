@@ -42,7 +42,7 @@ Every claim here comes from a real `opencode serve` process with no mocked plugi
 | V2 | Interrupting a running check kills the command and pauses the goal | ✅ | `late.txt` never written, stored `paused`, no failed check counted |
 | A14 | The plugin installed from its package spec works | ✅ | stored `complete`. CI installs `github:<repo>#<commit under test>` |
 | A15 | `goal.get` RPC returns the stored goal and `goal.changed` fires on each transition | ✅ | RPC output equals the `kv` row, events read from `/api/event` |
-| A17 | A bare `/goal edit` sends the full objective to the terminal through `goal.editRequested`, and `goal.edit` saves the new one | ✅ | event payload read from `/api/event`, stored new objective with status kept, refusal notice without a goal |
+| A17 | A bare `/goal edit` sends the full objective to the terminal through `goal.editRequested`, and `apply Edit` saves the new one | ✅ | event payload read from `/api/event`, stored new objective with status kept, refusal notice without a goal |
 | R1 | `goal.apply` with `Pause` pauses an active goal | ✅ | real opencode serve, stored goal |
 | R2 | `goal.apply` with a raised `Budget` resumes a budget-limited goal, which then completes | ✅ | real opencode serve, stored goal |
 | R3 | `goal.apply` with `Verify` stores the verify command | ✅ | real opencode serve, stored goal |

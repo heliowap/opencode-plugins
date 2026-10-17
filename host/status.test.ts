@@ -49,7 +49,7 @@ describe("status for the terminal", () => {
   )
 
   test(
-    "A17 a bare /goal edit hands the full objective to the terminal, and goal.edit saves the new one",
+    "A17 a bare /goal edit hands the full objective to the terminal, and apply Edit saves the new one",
     async () => {
       host = await Host.start({ script: () => ({ text: "Step." }) })
       const empty = await host.session()

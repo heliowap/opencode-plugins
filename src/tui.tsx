@@ -2,8 +2,8 @@
 import type { TextareaRenderable } from "@opentui/core"
 import { Plugin } from "@opencode/plugin/tui"
 import type { Context } from "@opencode/plugin/tui/context"
-import { editedObjective, goalBadge, objectiveLines, sidebarTitle, SPIN_INTERVAL_MS, type Tone } from "./badge.ts"
-import { budgetEvent, controlsFor, dialogTitle, verifyEvent } from "./controls.ts"
+import { dialogTitle, editedObjective, goalBadge, objectiveLines, sidebarTitle, SPIN_INTERVAL_MS, type Tone } from "./badge.ts"
+import { budgetEvent, controlEvent, controlsFor, verifyEvent } from "./controls.ts"
 import { decodeGoal, type Goal, type GoalEvent } from "./goal.ts"
 import { GoalRpc } from "./rpc.ts"
 
@@ -106,11 +106,9 @@ export default Plugin.define({
       const value = controls.find((control) => control.id === id)?.value
       switch (id) {
         case "pause":
-          return act(sessionID, { _tag: "Pause" })
         case "resume":
-          return act(sessionID, { _tag: "Resume" })
         case "edit":
-          return act(sessionID, { _tag: "EditRequested" })
+          return act(sessionID, controlEvent(id)!)
         case "budget": {
           const text = await context.ui.dialog.prompt({
             title: "Token budget",
@@ -133,7 +131,7 @@ export default Plugin.define({
         }
         case "clear":
           if (await context.ui.dialog.confirm({ title: "Clear goal?", message: "The objective and its token usage are deleted." })) {
-            act(sessionID, { _tag: "Clear" })
+            act(sessionID, controlEvent(id)!)
           }
       }
     }

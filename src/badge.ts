@@ -21,6 +21,8 @@ const spinnerGlyph = (frame: number) => SPINNER[frame % SPINNER.length]!
 
 export const sidebarTitle = (running: boolean, frame: number): string => running ? `${spinnerGlyph(frame)} Goal` : "Goal"
 
+export const dialogTitle = (goal: Goal): string => `Goal · ${goal.status === "budget_limited" ? "budget reached" : goal.status}`
+
 const badges: Record<Status, (goal: Goal, running: boolean, frame: number) => Badge | undefined> = {
   active: (goal, running, frame) =>
     running

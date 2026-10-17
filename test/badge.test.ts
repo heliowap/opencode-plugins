@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { editedObjective, goalBadge, objectiveLines, sidebarTitle } from "../src/badge.ts"
+import { dialogTitle, editedObjective, goalBadge, objectiveLines, sidebarTitle } from "../src/badge.ts"
 import type { Goal } from "../src/goal.ts"
 
 const goal = (overrides: Partial<Goal> = {}): Goal => ({
@@ -75,4 +75,13 @@ test("sidebarTitle animates only while running", () => {
   expect(sidebarTitle(true, 0)).toBe("◐ Goal")
   expect(sidebarTitle(true, 4)).toBe("◐ Goal")
   expect(sidebarTitle(false, 2)).toBe("Goal")
+})
+
+test.each([
+  ["active", "Goal · active"],
+  ["paused", "Goal · paused"],
+  ["blocked", "Goal · blocked"],
+  ["budget_limited", "Goal · budget reached"],
+] as const)("dialogTitle for a %s goal", (status, expected) => {
+  expect(dialogTitle(goal({ status }))).toBe(expected)
 })
