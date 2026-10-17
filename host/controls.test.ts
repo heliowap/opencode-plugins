@@ -13,6 +13,38 @@ afterEach(async () => {
 const complete = { tool: "goal_update", args: { status: "complete", note: "done" } } as const
 
 describe("user controls", () => {
+  test("R1 apply Pause pauses an active goal", async () => {
+    host = await Host.start({ script: () => ({ text: "working", delayMs: 3_000 }) })
+    const session = await host.session()
+    await host.goal(session, "pause me")
+    await host.until(() => host!.fixture.agentRequests().length === 1)
+    await host.rpc("apply", { sessionID: session.id, action: { _tag: "Pause" } })
+    expect(host.stored(session)).toMatchObject({ status: "paused", note: "Paused by the user." })
+  }, TIMEOUT)
+
+  test("R3 apply Verify stores the verify command", async () => {
+    host = await Host.start({ script: () => ({ text: "working", delayMs: 3_000 }) })
+    const session = await host.session()
+    await host.goal(session, "verify me")
+    await host.rpc("apply", { sessionID: session.id, action: { _tag: "Verify", verify: "bun test" } })
+    expect(host.stored(session)).toMatchObject({ verify: "bun test" })
+  }, TIMEOUT)
+
+  test("R2 apply Budget raised on a budget-limited goal resumes it", async () => {
+    let requests = 0
+    host = await Host.start({
+      script: (request) =>
+        requests++ < 2 ? { text: "Spending." } : afterToolResult(request) ? { text: "Done." } : complete,
+    })
+    const session = await host.session()
+    await host.goal(session, "--tokens 100 over budget")
+    await host.settle(session)
+    expect(host.stored(session)).toMatchObject({ status: "budget_limited" })
+    await host.rpc("apply", { sessionID: session.id, action: { _tag: "Budget", tokenBudget: 1000 } })
+    await host.settle(session)
+    expect(host.stored(session)).toMatchObject({ status: "complete", tokenBudget: 1000 })
+  }, TIMEOUT)
+
   test(
     "A6 /goal edit during a turn steers that turn and keeps the usage",
     async () => {

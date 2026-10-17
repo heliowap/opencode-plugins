@@ -46,8 +46,13 @@ Every claim here comes from a real `opencode serve` process with no mocked plugi
 | T1 | The line above the input shows running with usage, then paused, then nothing after clear | ✅ | real `opencode` terminal in tmux, screen text above the input |
 | T2 | The line shows active between turns (`plan` agent), blocked, and budget reached | ✅ | same, with the stored status checked first |
 | T3 | The sidebar shows the objective cut to three lines, and a typed `/goal edit` opens it in an editor that saves with `ctrl+s` and discards with `esc` | ✅ | screen text in tmux, stored objective after save and after discard |
+| T4 | The sidebar `Goal` title turns through all four glyphs within 1.5 s while a turn runs | ✅ | screen text in tmux |
+| T5 | Clicking the sidebar `Goal` title opens the objective editor | ✅ | SGR mouse press and release sent with `tmux send-keys -l`, editor absent before and shown after |
+| T6 | Clicking the line above the input opens the goal controls, which set a `5K` budget and then pause the goal | ✅ | SGR click in tmux, stored `tokenBudget: 5000`, then stored `paused` |
+| T7 | `Goal controls` in the command palette opens the controls, which clear the goal after a confirm | ✅ | keys in tmux, stored goal gone |
+| T8 | `Goal controls` in the command palette reports when the session has no unfinished goal | ✅ | keys in tmux, screen text |
 
-T1, T2, and T3 start the real `opencode` terminal client against the canary server inside tmux, then read the line directly above the input with `tmux capture-pane`. CI runs them twice: once with the linked source, and once with the plugin installed from the commit under test (`tui-package`). The installed run caught a bug the linked run could not see. An installed package resolves `solid-js` to its own copy, which the host renderer does not track, so the line stayed empty. The status line now keeps its state in the host's `context.storage.memory` store and imports nothing from `solid-js`.
+T1 to T8 start the real `opencode` terminal client against the canary server inside tmux, then read the screen with `tmux capture-pane`. CI runs them twice: once with the linked source, and once with the plugin installed from the commit under test (`tui-package`). The installed run caught a bug the linked run could not see. An installed package resolves `solid-js` to its own copy, which the host renderer does not track, so the line stayed empty. The status line now keeps its state in the host's `context.storage.memory` store and imports nothing from `solid-js`.
 
 The canaries found three bugs, each fixed test-first: #1, #2, #3. A later code review found five more, fixed the same way: #9, #10, #11, #12, #13.
 

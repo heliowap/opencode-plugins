@@ -57,6 +57,8 @@ export type GoalEvent =
   | { readonly _tag: "Pause" }
   | { readonly _tag: "Resume" }
   | { readonly _tag: "Clear" }
+  | { readonly _tag: "Budget"; readonly tokenBudget: number | null }
+  | { readonly _tag: "Verify"; readonly verify: string | null }
   | { readonly _tag: "Complete"; readonly note: string | undefined; readonly check?: Check }
   | { readonly _tag: "Block"; readonly note: string | undefined }
   | { readonly _tag: "PauseRequested"; readonly note: string | undefined }
@@ -94,10 +96,12 @@ const RESET_STREAK = { failedTurns: undefined }
 
 export const isUnfinished = (goal: Goal | undefined): goal is Goal => goal !== undefined && goal.status !== "complete"
 
-const outOfBudget = (goal: Goal) => goal.tokenBudget !== null && goal.tokensUsed >= goal.tokenBudget
+export const outOfBudget = (goal: Goal) => goal.tokenBudget !== null && goal.tokensUsed >= goal.tokenBudget
+
+export const COMPLETE_REFUSAL = "The goal is complete. Set a new goal instead."
 
 const resumeRefusal = (goal: Goal): string | undefined => {
-  if (goal.status === "complete") return "The goal is complete. Set a new goal instead."
+  if (goal.status === "complete") return COMPLETE_REFUSAL
   if (outOfBudget(goal)) return "The goal has used its token budget. Set a new goal with a larger --tokens budget."
   return undefined
 }
@@ -135,7 +139,9 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
       event._tag === "Resume" ||
       event._tag === "Clear" ||
       event._tag === "Edit" ||
-      event._tag === "EditRequested"
+      event._tag === "EditRequested" ||
+      event._tag === "Budget" ||
+      event._tag === "Verify"
       ? { goal, effect: refuse(NO_GOAL) }
       : unchanged
   }
@@ -147,6 +153,23 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
       return update({ directory: event.directory })
     case "Clear":
       return { goal: undefined, effect: notify("Goal cleared.") }
+    case "Budget": {
+      if (goal.status === "complete") return { goal, effect: refuse(COMPLETE_REFUSAL) }
+      const next = { ...goal, tokenBudget: event.tokenBudget }
+      if (goal.status === "active" && outOfBudget(next)) {
+        return update({ tokenBudget: event.tokenBudget, status: "budget_limited", note: "Token budget reached." }, { _tag: "WrapUp" })
+      }
+      if (goal.status === "budget_limited" && !outOfBudget(next)) {
+        return update({ tokenBudget: event.tokenBudget, status: "active", note: undefined, emptyTurns: 0, ...RESET_STREAK }, { _tag: "Continue" })
+      }
+      return update({ tokenBudget: event.tokenBudget }, notify(event.tokenBudget === null ? "Token budget removed." : "Token budget updated."))
+    }
+    case "Verify":
+      if (goal.status === "complete") return { goal, effect: refuse(COMPLETE_REFUSAL) }
+      return update(
+        { verify: event.verify ?? undefined, verifyFailures: undefined, lastExitCode: undefined },
+        notify(event.verify === null ? "Verify command removed." : "Verify command updated."),
+      )
     case "EditRequested": {
       const refusal = resumeRefusal(goal)
       return { goal, effect: refusal ? refuse(refusal) : { _tag: "OpenEditor", objective: goal.objective } }

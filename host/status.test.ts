@@ -74,7 +74,7 @@ describe("status for the terminal", () => {
       requested.stop()
       expect(requested.seen.map((event) => event.data)).toEqual([{ sessionID: session.id, objective }])
 
-      const saved = (await host.rpc("edit", { sessionID: session.id, objective: "only the login test" })) as { goal: unknown }
+      const saved = (await host.rpc("apply", { sessionID: session.id, action: { _tag: "Edit", objective: "only the login test" } })) as { goal: unknown }
       const stored = host.stored(session)
       expect(stored).toMatchObject({ objective: "only the login test", status: "paused" })
       expect(saved).toEqual({ goal: stored })

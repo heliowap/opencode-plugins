@@ -57,6 +57,14 @@ const shows = (expected: string | RegExp) =>
     `the line above the input never showed ${typeof expected === "string" ? `"${expected}"` : expected}.`,
   )
 
+const click = (pattern: RegExp) => {
+  const lines = screen().split("\n")
+  const row = lines.findIndex((line) => pattern.test(line))
+  expect(row).toBeGreaterThanOrEqual(0)
+  const cell = `${lines[row]!.search(pattern) + 1};${row + 1}`
+  type("-l", `\x1b[<0;${cell}M\x1b[<0;${cell}m`)
+}
+
 const running = (usage: string) => new RegExp(`^[◐◓◑◒] goal running · ${usage}$`)
 
 describe.skipIf(!tmux && !process.env.CI)("status above the input in the terminal UI", () => {
@@ -167,6 +175,127 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       await host.until(() => !screen().includes("Edit goal"))
       await Bun.sleep(1_000)
       expect(host.stored(session)?.objective).toBe(`${objective} soon`)
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "T4 the sidebar title spins while a turn runs",
+    async () => {
+      host = await Host.start({
+        script: () => ({ text: "Step.", delayMs: 4_000 }),
+        ...(process.env.GOAL_PLUGIN_SPEC && { pluginSpec: process.env.GOAL_PLUGIN_SPEC }),
+      })
+      const session = await host.session()
+      await host.goal(session, "spin the sidebar title")
+      open(session)
+
+      await shows(running("120"))
+      const glyphs = new Set<string>()
+      const sampled = Date.now() + 1_500
+      while (Date.now() < sampled) {
+        const glyph = /([◐◓◑◒]) Goal/.exec(screen())?.[1]
+        if (glyph) glyphs.add(glyph)
+        await Bun.sleep(50)
+      }
+      expect([...glyphs].sort()).toEqual(["◐", "◑", "◒", "◓"])
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "T5 clicking the sidebar title opens the objective editor",
+    async () => {
+      host = await Host.start({
+        script: () => ({ text: "Step." }),
+        ...(process.env.GOAL_PLUGIN_SPEC && { pluginSpec: process.env.GOAL_PLUGIN_SPEC }),
+      })
+      const session = await host.session()
+      await host.goal(session, "open me from the sidebar")
+      await host.goal(session, "pause")
+      await host.settle(session)
+      open(session)
+
+      await sees(["open me from the sidebar"])
+      expect(screen()).not.toContain("Edit goal")
+      click(/\bGoal\b/)
+      await sees(["Edit goal", "open me from the sidebar"])
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "T6 clicking the badge opens the controls, which set the token budget and pause the goal",
+    async () => {
+      host = await Host.start({
+        script: () => ({ text: "Step.", delayMs: 4_000 }),
+        ...(process.env.GOAL_PLUGIN_SPEC && { pluginSpec: process.env.GOAL_PLUGIN_SPEC }),
+      })
+      const session = await host.session()
+      await host.goal(session, "control me from the badge")
+      open(session)
+
+      await shows(running("120"))
+      click(/goal (running|active)/)
+      await sees(["Token budget", "Pause goal", "Clear goal"])
+      type("-l", "Token budget")
+      type("Enter")
+      await sees(["Such as 50K or 1.5M"])
+      type("-l", "5K")
+      type("Enter")
+      await host.until(() => host!.stored(session)?.tokenBudget === 5_000)
+
+      click(/goal (running|active)/)
+      await sees(["Pause goal"])
+      type("-l", "Pause goal")
+      type("Enter")
+      await host.until(() => host!.stored(session)?.status === "paused")
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "T7 the palette opens the controls, which clear the goal after a confirm",
+    async () => {
+      host = await Host.start({
+        script: () => ({ text: "Step." }),
+        ...(process.env.GOAL_PLUGIN_SPEC && { pluginSpec: process.env.GOAL_PLUGIN_SPEC }),
+      })
+      const session = await host.session()
+      await host.goal(session, "clear me from the palette")
+      await host.goal(session, "pause")
+      await host.settle(session)
+      open(session)
+
+      await shows("⏸ goal paused")
+      type("C-p")
+      type("-l", "Goal controls")
+      type("Enter")
+      await sees(["Resume goal", "Clear goal"])
+      type("-l", "Clear goal")
+      type("Enter")
+      await sees(["Clear goal?"])
+      type("Enter")
+      await host.until(() => host!.stored(session) === undefined)
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "T8 the palette reports when the session has no unfinished goal",
+    async () => {
+      host = await Host.start({
+        script: () => ({ text: "Step." }),
+        ...(process.env.GOAL_PLUGIN_SPEC && { pluginSpec: process.env.GOAL_PLUGIN_SPEC }),
+      })
+      const session = await host.session()
+      open(session)
+
+      await sees(["ctrl+p commands"])
+      type("C-p")
+      type("-l", "Goal controls")
+      type("Enter")
+      await sees(["This session has no unfinished goal."])
     },
     TIMEOUT,
   )

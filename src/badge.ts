@@ -17,6 +17,8 @@ export const SPIN_INTERVAL_MS = 150
 
 const SPINNER = ["◐", "◓", "◑", "◒"]
 
+export const sidebarTitle = (running: boolean, frame: number): string => running ? `${SPINNER[frame % SPINNER.length]!} Goal` : "Goal"
+
 const badges: Record<Status, (goal: Goal, running: boolean, frame: number) => Badge | undefined> = {
   active: (goal, running, frame) =>
     running

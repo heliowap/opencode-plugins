@@ -9,6 +9,35 @@ const goalOutput = {
   additionalProperties: false,
 } as const
 
+const action = {
+  anyOf: [
+    {
+      type: "object",
+      properties: { _tag: { enum: ["Pause", "Resume", "Clear", "EditRequested"] } },
+      required: ["_tag"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: { _tag: { const: "Edit" }, objective: { type: "string", minLength: 1 } },
+      required: ["_tag", "objective"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: { _tag: { const: "Budget" }, tokenBudget: { anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }] } },
+      required: ["_tag", "tokenBudget"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: { _tag: { const: "Verify" }, verify: { anyOf: [{ type: "string", minLength: 1 }, { type: "null" }] } },
+      required: ["_tag", "verify"],
+      additionalProperties: false,
+    },
+  ],
+} as const
+
 export const GoalRpc = Rpc.define({
   id: "goal",
   methods: {
@@ -21,11 +50,11 @@ export const GoalRpc = Rpc.define({
       },
       output: goalOutput,
     },
-    edit: {
+    apply: {
       input: {
         type: "object",
-        properties: { sessionID: { type: "string" }, objective: { type: "string", minLength: 1 } },
-        required: ["sessionID", "objective"],
+        properties: { sessionID: { type: "string" }, action },
+        required: ["sessionID", "action"],
         additionalProperties: false,
       },
       output: goalOutput,

@@ -157,11 +157,11 @@ export default Plugin.define({
       const rpc = yield* ctx.rpc
         .register(GoalRpc, {
           get: (input) => load((input as { sessionID: string }).sessionID).pipe(Effect.map((goal) => goalOutput({ goal }))),
-          edit: (input) => {
-            const { sessionID, objective } = input as { sessionID: string; objective: string }
-            return transition(sessionID, { _tag: "Edit", objective }).pipe(
+          apply: (input) => {
+            const { sessionID, action } = input as { sessionID: string; action: GoalEvent }
+            return transition(sessionID, action).pipe(
               Effect.map(goalOutput),
-              Effect.tapCause(logFailure("goal.edit", sessionID)),
+              Effect.tapCause(logFailure("goal.apply", sessionID)),
               Effect.orDie,
             )
           },
