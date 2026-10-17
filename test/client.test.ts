@@ -5,6 +5,9 @@ import type { Account } from "../src/quota.ts"
 const seen: { path: string; key: string | null }[] = []
 const probes: unknown[] = []
 const claude = { status: 200, probes: 0, observedAt: "2026-10-06T12:00:00Z", fiveHour: "0.2", sevenDay: "0.4" }
+let concurrentBannedRequests = 0
+let recoveryRequests = 0
+let probeBannedRequests = 0
 const claudeSettings = () => ({ baseURL: `${server.url.origin}/claude`, managementKey: "secret" })
 
 const server = Bun.serve({
@@ -14,6 +17,31 @@ const server = Bun.serve({
     seen.push({ path: url.pathname, key: request.headers.get("x-management-key") })
     if (request.headers.get("x-management-key") !== "secret") return Response.json({ error: "invalid management key" }, { status: 401 })
     if (url.pathname === "/broken/v8/management/credentials") return new Response("upstream exploded", { status: 502, statusText: "Bad Gateway" })
+    if (url.pathname === "/banned/v8/management/credentials")
+      return Response.json({ error: "IP banned due to too many failed attempts. Try again in 2m" }, { status: 403 })
+    if (url.pathname === "/banned-worded/v8/management/credentials")
+      return Response.json({ error: "IP banned due to too many failed attempts. Try again in 30 seconds" }, { status: 429 })
+    if (url.pathname === "/retry-header/v8/management/credentials")
+      return Response.json({ error: "temporarily unavailable" }, { status: 429, headers: { "Retry-After": "3" } })
+    if (url.pathname === "/retry-date/v8/management/credentials")
+      return Response.json({ error: "temporarily unavailable" }, { status: 429, headers: { "Retry-After": "Thu, 01 Jan 1970 00:02:03 GMT" } })
+    if (url.pathname === "/banned-concurrent/v8/management/credentials") {
+      concurrentBannedRequests++
+      await Bun.sleep(10)
+      return Response.json({ error: "IP banned due to too many failed attempts. Try again in 2m" }, { status: 403 })
+    }
+    if (url.pathname === "/recover/v8/management/credentials") {
+      recoveryRequests++
+      if (recoveryRequests === 1)
+        return Response.json({ error: "IP banned due to too many failed attempts. Try again in 2m" }, { status: 403 })
+      return Response.json({ files: [{ provider: "codex", label: "recovered", quota: { signals: { "X-Codex-Primary-Used-Percent": "12" } } }] })
+    }
+    if (url.pathname === "/probe-banned/v8/management/credentials")
+      return Response.json({ files: [{ provider: "codex", auth_index: "probe-banned", label: "recorded", quota: { signals: { "X-Codex-Primary-Used-Percent": "9" } } }] })
+    if (url.pathname === "/probe-banned/v8/management/requests/api-call") {
+      probeBannedRequests++
+      return Response.json({ error: "IP banned due to too many failed attempts. Try again in 2m" }, { status: 403 })
+    }
     if (url.pathname === "/html/v8/management/credentials")
       return Response.json({
         files: [{ provider: "codex", auth_index: "h1", label: "h", quota: { signals: { "X-Codex-Primary-Used-Percent": "3" } } }],
@@ -208,6 +236,78 @@ describe("fetchAccounts", () => {
       ok: false,
       error: "HTTP 401: invalid management key",
     })
+  })
+
+  test("does not repeat a temporarily blocked management request before its retry time", async () => {
+    const memory = new Map()
+    const settings = { baseURL: `${server.url.origin}/banned`, managementKey: "secret" }
+    const first = await fetchAccounts(settings, 1_000, memory)
+    const requestsAfterFirst = seen.length
+    expect(first).toEqual({ ok: false, error: "HTTP 403: IP banned due to too many failed attempts. Try again in 2m" })
+
+    expect(await fetchAccounts(settings, 61_000, memory)).toEqual(first)
+    expect(seen.length).toBe(requestsAfterFirst)
+    expect((await fetchAccounts({ baseURL: server.url.origin, managementKey: "secret" }, 61_000, memory)).ok).toBe(true)
+    expect(seen.length).toBe(requestsAfterFirst + 1)
+    expect((await fetchAccounts(settings, 121_000, memory)).ok).toBe(false)
+    expect(seen.length).toBe(requestsAfterFirst + 2)
+  })
+
+  test("parses worded retry durations and Retry-After seconds", async () => {
+    const wordedMemory = new Map()
+    const worded = { baseURL: `${server.url.origin}/banned-worded`, managementKey: "secret" }
+    await fetchAccounts(worded, 1_000, wordedMemory)
+    const afterWorded = seen.length
+    await fetchAccounts(worded, 30_000, wordedMemory)
+    expect(seen.length).toBe(afterWorded)
+
+    const headerMemory = new Map()
+    const header = { baseURL: `${server.url.origin}/retry-header`, managementKey: "secret" }
+    await fetchAccounts(header, 1_000, headerMemory)
+    const afterHeader = seen.length
+    await fetchAccounts(header, 3_000, headerMemory)
+    expect(seen.length).toBe(afterHeader)
+    await fetchAccounts(header, 4_000, headerMemory)
+    expect(seen.length).toBe(afterHeader + 1)
+
+    const dateMemory = new Map()
+    const date = { baseURL: `${server.url.origin}/retry-date`, managementKey: "secret" }
+    await fetchAccounts(date, 1_000, dateMemory)
+    const afterDate = seen.length
+    await fetchAccounts(date, 122_000, dateMemory)
+    expect(seen.length).toBe(afterDate)
+    await fetchAccounts(date, 123_000, dateMemory)
+    expect(seen.length).toBe(afterDate + 1)
+  })
+
+  test("deduplicates overlapping blocked refreshes and resumes normal reads after expiry", async () => {
+    const memory = new Map()
+    const concurrent = { baseURL: `${server.url.origin}/banned-concurrent`, managementKey: "secret" }
+    await Promise.all([fetchAccounts(concurrent, 1_000, memory), fetchAccounts(concurrent, 1_000, memory)])
+    expect(concurrentBannedRequests).toBe(1)
+
+    const recovery = { baseURL: `${server.url.origin}/recover`, managementKey: "secret" }
+    const recoveryMemory = new Map()
+    expect(await fetchAccounts(recovery, 1_000, recoveryMemory)).toEqual({ ok: false, error: "HTTP 403: IP banned due to too many failed attempts. Try again in 2m" })
+    expect(await fetchAccounts(recovery, 121_000, recoveryMemory)).toEqual({
+      ok: true,
+      accounts: [{ provider: "codex", label: "recovered", authIndex: undefined, observedAt: undefined, windows: [{ kind: "5h", usedPercent: 12, resetAt: undefined }] }],
+    })
+    expect(recoveryRequests).toBe(2)
+  })
+
+  test("backs off a rate-limited quota probe while keeping recorded signals", async () => {
+    const memory = new Map()
+    const settings = { baseURL: `${server.url.origin}/probe-banned`, managementKey: "secret" }
+    expect(await fetchAccounts(settings, 1_000, memory)).toEqual({
+      ok: true,
+      accounts: [{ provider: "codex", label: "recorded", authIndex: "probe-banned", observedAt: undefined, windows: [{ kind: "5h", usedPercent: 9, resetAt: undefined }] }],
+    })
+    expect(await fetchAccounts(settings, 61_000, memory)).toEqual({
+      ok: true,
+      accounts: [{ provider: "codex", label: "recorded", authIndex: "probe-banned", observedAt: undefined, windows: [{ kind: "5h", usedPercent: 9, resetAt: undefined }] }],
+    })
+    expect(probeBannedRequests).toBe(1)
   })
 
   test("reports a missing key without calling the proxy", async () => {
