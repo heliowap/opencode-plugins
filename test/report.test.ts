@@ -9,6 +9,7 @@ const lines = [
   { at: T + 2_000, _tag: "ToolError", sessionID: "ses_a", tool: "goal_update", message: "The goal is paused and cannot move to complete." },
   { at: T + 3_000, _tag: "Command", sessionID: "ses_a", text: "edit", result: "Invalid", message: "Write the new objective after /goal edit." },
   { at: T + 4_000, _tag: "Transition", sessionID: "ses_a", event: "Failed", from: "active", to: "blocked", effect: "None", tokensUsed: 900, note: "Turn failed: boom" },
+  { at: T + 4_100, _tag: "Transition", sessionID: "ses_a", event: "Resume", from: "blocked", to: "blocked", effect: "Refuse", text: "The goal is complete. Set a new goal instead." },
   { at: T + 4_200, _tag: "Error", sessionID: "ses_a", where: "session.step.ended", cause: "Error: boom" },
   { at: T + 4_500, _tag: "Command", sessionID: "ses_a", text: "pause", result: "Pause" },
   { at: T + 5_000, _tag: "Transition", sessionID: "ses_b", event: "Set", from: "none", to: "active", effect: "Continue", tokensUsed: 0, objective: "x" },
@@ -16,9 +17,9 @@ const lines = [
 ].map((record) => JSON.stringify(record))
 
 test("without a session, one row per session with its last status and problems, then errors outside sessions", () => {
-  expect(summarize([...lines, "not json"])).toBe(
+  expect(summarize([...lines, "not json", "null", "[1]", JSON.stringify({ _tag: "Transition" }), JSON.stringify({ _tag: "Other", at: T })])).toBe(
     [
-      "ses_a  blocked  7 records  3 commands (1 refused)  1 tool errors  1 errors  last 2026-10-17T12:00:04.500Z",
+      "ses_a  blocked  8 records  3 commands (2 refused)  1 tool errors  1 errors  last 2026-10-17T12:00:04.500Z",
       "ses_b  active  1 records  0 commands (0 refused)  0 tool errors  0 errors  last 2026-10-17T12:00:05.000Z",
       "1 errors outside sessions, last 2026-10-17T12:00:06.000Z: recovery failed: Error: disk full",
     ].join("\n"),
@@ -33,6 +34,7 @@ test("with a session, its timeline in order", () => {
       "2026-10-17T12:00:02.000Z  goal_update failed: The goal is paused and cannot move to complete.",
       "2026-10-17T12:00:03.000Z  /goal edit -> Invalid: Write the new objective after /goal edit.",
       "2026-10-17T12:00:04.000Z  Failed: active -> blocked [None] note: Turn failed: boom",
+      "2026-10-17T12:00:04.100Z  Resume: blocked -> blocked [Refuse] The goal is complete. Set a new goal instead.",
       "2026-10-17T12:00:04.200Z  session.step.ended failed: Error: boom",
       "2026-10-17T12:00:04.500Z  /goal pause -> Pause",
     ].join("\n"),

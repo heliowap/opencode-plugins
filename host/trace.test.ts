@@ -34,6 +34,8 @@ describe("trace log", () => {
     async () => {
       host = await Host.start({ script })
       const session = await host.session()
+      // The two notices wait in the inbox and reach the goal's first turn, which answers them in one more step.
+      await host.goal(session, "pause")
       await host.goal(session, "--tokens nope go")
       await host.goal(session, "trace me")
       await host.until(() => host!.stored(session)?.status === "complete")
@@ -41,6 +43,8 @@ describe("trace log", () => {
 
       const own = records(host).filter((record) => record.sessionID === session.id)
       expect(own.map(({ at: _at, ...rest }) => rest)).toEqual([
+        { _tag: "Command", sessionID: session.id, text: "pause", result: "Pause" },
+        { _tag: "Transition", sessionID: session.id, event: "Pause", from: "none", to: "none", effect: "Refuse", text: "No goal is set for this session." },
         {
           _tag: "Command",
           sessionID: session.id,
@@ -56,7 +60,7 @@ describe("trace log", () => {
           tool: "goal_create",
           message: "This session already has an unfinished goal (active). Finish it, or ask the user to replace it with /goal <objective>.",
         },
-        { _tag: "Transition", sessionID: session.id, event: "Complete", from: "active", to: "complete", effect: "None", tokensUsed: 240, note: "done" },
+        { _tag: "Transition", sessionID: session.id, event: "Complete", from: "active", to: "complete", effect: "None", tokensUsed: 360, note: "done" },
       ])
     },
     TIMEOUT,

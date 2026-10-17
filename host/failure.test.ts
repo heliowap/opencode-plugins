@@ -34,7 +34,7 @@ describe("failures", () => {
       let failures = 0
       host = await Host.start({
         noHostRetry: true,
-        env: { GOAL_RETRY_DELAYS_MS: "500,500,500" },
+        pluginOptions: { retryDelaysMs: [500, 500, 500] },
         script: (request) => {
           if (failures === 0) {
             failures++
@@ -60,7 +60,7 @@ describe("failures", () => {
     async () => {
       host = await Host.start({
         noHostRetry: true,
-        env: { GOAL_RETRY_DELAYS_MS: "300,300,300" },
+        pluginOptions: { retryDelaysMs: [300, 300, 300] },
         script: () => ({ status: 503, error: "upstream unavailable" }),
       })
       const session = await host.session()
@@ -82,7 +82,7 @@ describe("failures", () => {
     async () => {
       host = await Host.start({
         noHostRetry: true,
-        env: { GOAL_RETRY_DELAYS_MS: "3000,3000,3000" },
+        pluginOptions: { retryDelaysMs: [3000, 3000, 3000] },
         script: () => ({ status: 503, error: "upstream unavailable" }),
       })
       const session = await host.session()
@@ -104,7 +104,7 @@ describe("failures", () => {
       let failures = 0
       host = await Host.start({
         noHostRetry: true,
-        env: { GOAL_RETRY_DELAYS_MS: "3000,3000,3000" },
+        pluginOptions: { retryDelaysMs: [3000, 3000, 3000] },
         script: (request) => {
           if (failures === 0) {
             failures++

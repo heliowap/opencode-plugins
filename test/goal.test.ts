@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { decodeGoal, editRefusal, isUnfinished, step, type Goal } from "../src/goal.ts"
+import { decodeGoal, isUnfinished, retryDelays, step, type Goal } from "../src/goal.ts"
 
 const T0 = 1_000
 const T1 = 2_000
@@ -55,7 +55,7 @@ describe("set and edit", () => {
     const done = active({ status: "complete", note: "all green" })
     expect(step(done, { _tag: "Edit", objective: "x" }, T1)).toEqual({
       goal: done,
-      effect: { _tag: "Notify", text: "The goal is complete. Set a new goal instead." },
+      effect: { _tag: "Refuse", text: "The goal is complete. Set a new goal instead." },
     })
   })
 
@@ -63,7 +63,7 @@ describe("set and edit", () => {
     const limited = active({ status: "budget_limited", tokenBudget: 1_000, tokensUsed: 1_200 })
     expect(step(limited, { _tag: "Edit", objective: "x" }, T1)).toEqual({
       goal: limited,
-      effect: { _tag: "Notify", text: "The goal has used its token budget. Set a new goal with a larger --tokens budget." },
+      effect: { _tag: "Refuse", text: "The goal has used its token budget. Set a new goal with a larger --tokens budget." },
     })
   })
 
@@ -145,7 +145,7 @@ describe("token budget", () => {
     const limited = active({ status: "budget_limited", tokenBudget: 1_000, tokensUsed: 1_000 })
     expect(step(limited, { _tag: "Resume" }, T1)).toEqual({
       goal: limited,
-      effect: { _tag: "Notify", text: "The goal has used its token budget. Set a new goal with a larger --tokens budget." },
+      effect: { _tag: "Refuse", text: "The goal has used its token budget. Set a new goal with a larger --tokens budget." },
     })
   })
 })
@@ -417,7 +417,7 @@ describe("user controls", () => {
 
   test("resume refuses a complete goal", () => {
     expect(step(active({ status: "complete" }), { _tag: "Resume" }, T1).effect).toEqual({
-      _tag: "Notify",
+      _tag: "Refuse",
       text: "The goal is complete. Set a new goal instead.",
     })
   })
@@ -429,7 +429,7 @@ describe("user controls", () => {
   test("controls without a goal explain there is none", () => {
     expect(step(undefined, { _tag: "Pause" }, T1)).toEqual({
       goal: undefined,
-      effect: { _tag: "Notify", text: "No goal is set for this session." },
+      effect: { _tag: "Refuse", text: "No goal is set for this session." },
     })
   })
 })
@@ -470,14 +470,14 @@ describe("user controls on goals that cannot take them", () => {
     const paused = active({ status: "paused" })
     expect(step(paused, { _tag: "Pause" }, T1)).toEqual({
       goal: paused,
-      effect: { _tag: "Notify", text: "The goal is paused; nothing to pause." },
+      effect: { _tag: "Refuse", text: "The goal is paused; nothing to pause." },
     })
   })
 
   test("resume on an active goal explains it is already active", () => {
     expect(step(active(), { _tag: "Resume" }, T1)).toEqual({
       goal: active(),
-      effect: { _tag: "Notify", text: "The goal is already active." },
+      effect: { _tag: "Refuse", text: "The goal is already active." },
     })
   })
 
@@ -491,14 +491,14 @@ describe("user controls on goals that cannot take them", () => {
   test.each([["Resume"], ["Clear"]] as const)("%s without a goal explains there is none", (tag) => {
     expect(step(undefined, { _tag: tag }, T1)).toEqual({
       goal: undefined,
-      effect: { _tag: "Notify", text: "No goal is set for this session." },
+      effect: { _tag: "Refuse", text: "No goal is set for this session." },
     })
   })
 
   test("edit without a goal explains there is none", () => {
     expect(step(undefined, { _tag: "Edit", objective: "x" }, T1)).toEqual({
       goal: undefined,
-      effect: { _tag: "Notify", text: "No goal is set for this session." },
+      effect: { _tag: "Refuse", text: "No goal is set for this session." },
     })
   })
 
@@ -546,21 +546,32 @@ describe("isUnfinished", () => {
   })
 })
 
-describe("editRefusal", () => {
+describe("a bare /goal edit (EditRequested)", () => {
+  test.each([
+    ["active", active({ objective: "full text" })],
+    ["paused", active({ objective: "full text", status: "paused" })],
+    ["blocked", active({ objective: "full text", status: "blocked" })],
+  ])("opens the editor on a %s goal with the full objective", (_name, goal) => {
+    expect(step(goal, { _tag: "EditRequested" }, T1)).toEqual({ goal, effect: { _tag: "OpenEditor", objective: "full text" } })
+  })
+
   test.each([
     ["no goal", undefined, "No goal is set for this session."],
-    ["complete", active({ status: "complete" }), "The goal is complete. Set a new goal instead."],
+    ["a complete goal", active({ status: "complete" }), "The goal is complete. Set a new goal instead."],
     [
-      "out of budget",
+      "a goal out of budget",
       active({ status: "budget_limited", tokenBudget: 1_000, tokensUsed: 1_200 }),
       "The goal has used its token budget. Set a new goal with a larger --tokens budget.",
     ],
-    ["active", active(), undefined],
-    ["paused", active({ status: "paused" }), undefined],
-    ["blocked", active({ status: "blocked" }), undefined],
-  ] as const)("%s -> %p", (_name, goal, expected) => {
-    expect(editRefusal(goal)).toBe(expected)
+  ])("refuses with %s", (_name, goal, text) => {
+    expect(step(goal, { _tag: "EditRequested" }, T1)).toEqual({ goal, effect: { _tag: "Refuse", text } })
   })
+})
+
+test("an edit during a retry wait resets the failure streak, so the pending retry is dropped", () => {
+  const edited = step(active({ failedTurns: 2 }), { _tag: "Edit", objective: "narrower" }, T1)
+  expect(edited).toEqual({ goal: active({ objective: "narrower", updatedAt: T1 }), effect: { _tag: "ObjectiveUpdated" } })
+  expect(step(edited.goal, { _tag: "RetryDue", attempt: 2 }, T1).effect).toEqual({ _tag: "None" })
 })
 
 describe("cleared fields", () => {
@@ -569,5 +580,19 @@ describe("cleared fields", () => {
     expect(Object.keys(completed)).not.toContain("failedTurns")
     const resumed = step(active({ status: "blocked", note: "stuck" }), { _tag: "Resume" }, T1).goal!
     expect(Object.keys(resumed)).not.toContain("note")
+  })
+})
+
+describe("retryDelays", () => {
+  test.each([
+    ["no option", undefined, [30_000, 120_000, 300_000]],
+    ["three waits", [1, 2, 3], [1, 2, 3]],
+    ["zero is allowed", [0, 0, 0], [0, 0, 0]],
+    ["the wrong count", [1, 2], [30_000, 120_000, 300_000]],
+    ["a negative wait", [1, -2, 3], [30_000, 120_000, 300_000]],
+    ["a wait that is not a number", [1, "2", 3], [30_000, 120_000, 300_000]],
+    ["not a list", "1,2,3", [30_000, 120_000, 300_000]],
+  ] as const)("%s", (_name, option, expected) => {
+    expect(retryDelays(option)).toEqual([...expected])
   })
 })

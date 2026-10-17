@@ -25,6 +25,13 @@ export const decodeGoal = (value: unknown): Goal | undefined =>
 
 const EMPTY_TURN_LIMIT = 3
 export const RETRY_LIMIT = 3
+const RETRY_DELAYS_MS = [30_000, 120_000, 300_000]
+
+// Host canaries shorten the waits through the retryDelaysMs plugin option.
+export const retryDelays = (option: unknown): readonly number[] =>
+  Array.isArray(option) && option.length === RETRY_LIMIT && option.every((ms) => typeof ms === "number" && ms >= 0)
+    ? option
+    : RETRY_DELAYS_MS
 
 // OpenCode reports HTTP statuses up to 599.
 const serverError = (status: number | undefined) => (status ?? 0) >= 500
@@ -46,6 +53,7 @@ export type GoalEvent =
     }
   | { readonly _tag: "Moved"; readonly directory: string }
   | { readonly _tag: "Edit"; readonly objective: string }
+  | { readonly _tag: "EditRequested" }
   | { readonly _tag: "Pause" }
   | { readonly _tag: "Resume" }
   | { readonly _tag: "Clear" }
@@ -70,6 +78,8 @@ export type GoalEffect =
   | { readonly _tag: "WrapUp" }
   | { readonly _tag: "ObjectiveUpdated" }
   | { readonly _tag: "Notify"; readonly text: string }
+  | { readonly _tag: "Refuse"; readonly text: string }
+  | { readonly _tag: "OpenEditor"; readonly objective: string }
   | { readonly _tag: "Retry"; readonly attempt: number }
 
 interface Step {
@@ -79,6 +89,8 @@ interface Step {
 
 const none: GoalEffect = { _tag: "None" }
 const notify = (text: string): GoalEffect => ({ _tag: "Notify", text })
+const refuse = (text: string): GoalEffect => ({ _tag: "Refuse", text })
+const RESET_STREAK = { failedTurns: undefined }
 
 export const isUnfinished = (goal: Goal | undefined): goal is Goal => goal !== undefined && goal.status !== "complete"
 
@@ -91,9 +103,6 @@ const resumeRefusal = (goal: Goal): string | undefined => {
 }
 
 const NO_GOAL = "No goal is set for this session."
-
-export const editRefusal = (goal: Goal | undefined): string | undefined =>
-  goal ? resumeRefusal(goal) : NO_GOAL
 
 export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Step => {
   const unchanged: Step = { goal, effect: none }
@@ -122,8 +131,12 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
     }
   }
   if (!goal) {
-    return event._tag === "Pause" || event._tag === "Resume" || event._tag === "Clear" || event._tag === "Edit"
-      ? { goal, effect: notify(NO_GOAL) }
+    return event._tag === "Pause" ||
+      event._tag === "Resume" ||
+      event._tag === "Clear" ||
+      event._tag === "Edit" ||
+      event._tag === "EditRequested"
+      ? { goal, effect: refuse(NO_GOAL) }
       : unchanged
   }
 
@@ -134,10 +147,16 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
       return update({ directory: event.directory })
     case "Clear":
       return { goal: undefined, effect: notify("Goal cleared.") }
+    case "EditRequested": {
+      const refusal = resumeRefusal(goal)
+      return { goal, effect: refusal ? refuse(refusal) : { _tag: "OpenEditor", objective: goal.objective } }
+    }
     case "Edit": {
-      const refusal = editRefusal(goal)
-      if (refusal) return { goal, effect: notify(refusal) }
-      if (goal.status === "active") return update({ objective: event.objective, emptyTurns: 0 }, { _tag: "ObjectiveUpdated" })
+      const refusal = resumeRefusal(goal)
+      if (refusal) return { goal, effect: refuse(refusal) }
+      if (goal.status === "active") {
+        return update({ objective: event.objective, emptyTurns: 0, ...RESET_STREAK }, { _tag: "ObjectiveUpdated" })
+      }
       return update(
         { objective: event.objective },
         notify(`Objective updated. The goal is ${goal.status}; run /goal resume to continue.`),
@@ -146,21 +165,21 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
     case "Pause":
       return goal.status === "active"
         ? update({ status: "paused", note: "Paused by the user." }, notify("Goal paused."))
-        : { goal, effect: notify(`The goal is ${goal.status}; nothing to pause.`) }
+        : { goal, effect: refuse(`The goal is ${goal.status}; nothing to pause.`) }
     case "PauseRequested":
       return goal.status === "active" ? update({ status: "paused", note: event.note ?? "Paused at the user's request." }) : unchanged
     case "Resume": {
-      if (goal.status === "active") return { goal, effect: notify("The goal is already active.") }
+      if (goal.status === "active") return { goal, effect: refuse("The goal is already active.") }
       const refusal = resumeRefusal(goal)
-      if (refusal) return { goal, effect: notify(refusal) }
-      return update({ status: "active", note: undefined, emptyTurns: 0, failedTurns: undefined }, { _tag: "Continue" })
+      if (refusal) return { goal, effect: refuse(refusal) }
+      return update({ status: "active", note: undefined, emptyTurns: 0, ...RESET_STREAK }, { _tag: "Continue" })
     }
     case "Complete": {
       if (goal.status !== "active" && goal.status !== "budget_limited") return unchanged
-      if (goal.verify === undefined) return update({ status: "complete", note: event.note, failedTurns: undefined })
+      if (goal.verify === undefined) return update({ status: "complete", note: event.note, ...RESET_STREAK })
       if (event.check?.command !== goal.verify) return unchanged
       return event.check.exitCode === 0
-        ? update({ status: "complete", note: event.note, lastExitCode: 0, failedTurns: undefined })
+        ? update({ status: "complete", note: event.note, lastExitCode: 0, ...RESET_STREAK })
         : update({ verifyFailures: (goal.verifyFailures ?? 0) + 1, lastExitCode: event.check.exitCode })
     }
     case "Block":
@@ -205,8 +224,8 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
       if (goal.status !== "active" || event.planning) return unchanged
       const emptyTurns = event.activity ? 0 : goal.emptyTurns + 1
       return emptyTurns >= EMPTY_TURN_LIMIT
-        ? update({ emptyTurns, failedTurns: undefined, status: "blocked", note: `${EMPTY_TURN_LIMIT} consecutive turns produced no output.` })
-        : update({ emptyTurns, failedTurns: undefined }, { _tag: "Continue" })
+        ? update({ emptyTurns, ...RESET_STREAK, status: "blocked", note: `${EMPTY_TURN_LIMIT} consecutive turns produced no output.` })
+        : update({ emptyTurns, ...RESET_STREAK }, { _tag: "Continue" })
     }
   }
 }

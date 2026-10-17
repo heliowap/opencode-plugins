@@ -2,7 +2,7 @@
 import type { TextareaRenderable } from "@opentui/core"
 import { Plugin } from "@opencode/plugin/tui"
 import type { Context } from "@opencode/plugin/tui/context"
-import { goalBadge, objectiveLines, type Tone } from "./badge.ts"
+import { editedObjective, goalBadge, objectiveLines, type Tone } from "./badge.ts"
 import { decodeGoal, type Goal } from "./goal.ts"
 import { GoalRpc } from "./rpc.ts"
 
@@ -25,9 +25,9 @@ const EditGoal = (props: { context: Context; objective: string; save: (objective
   const { context } = props
   let editor: TextareaRenderable | undefined
   const save = () => {
-    const objective = editor?.plainText.trim() ?? ""
+    const objective = editedObjective(props.objective, editor?.plainText ?? "")
     context.ui.dialog.clear()
-    if (objective && objective !== props.objective.trim()) props.save(objective)
+    if (objective) props.save(objective)
   }
   context.keymap.layer(() => ({
     mode: "modal",
@@ -53,6 +53,7 @@ const EditGoal = (props: { context: Context; objective: string; save: (objective
         cursorColor={context.theme.text.base}
         ref={(element: TextareaRenderable) => {
           editor = element
+          // The textarea cannot take focus until the dialog has mounted; the host's own prompt dialog waits the same way.
           setTimeout(() => {
             if (element.isDestroyed) return
             element.focus()
@@ -76,7 +77,8 @@ export default Plugin.define({
       update((draft) => {
         draft[sessionID] = decodeGoal(goal) ?? null
       })
-    const load = (sessionID: string) => {
+    const goalOf = (sessionID: string) => goals[sessionID] ?? undefined
+    const fetchGoal = (sessionID: string) => {
       // A changed event that lands while get is in flight is newer than its result.
       void rpc.get({ sessionID }).then((result) => {
         if (!(sessionID in goals)) remember(sessionID, (result as { goal: unknown }).goal)
@@ -109,9 +111,9 @@ export default Plugin.define({
     context.ui.slot({
       append: "session.composer.top",
       render: (slot) => {
-        load(slot.sessionID)
+        fetchGoal(slot.sessionID)
         const badge = () =>
-          goalBadge(goals[slot.sessionID] ?? undefined, context.data.session.status(slot.sessionID) === "running")
+          goalBadge(goalOf(slot.sessionID), context.data.session.status(slot.sessionID) === "running")
         return (
           <>
             {badge() ? (
@@ -127,8 +129,8 @@ export default Plugin.define({
     context.ui.slot({
       prepend: "sidebar.footer",
       render: (slot) => {
-        load(slot.sessionID)
-        const lines = () => objectiveLines(goals[slot.sessionID] ?? undefined, SIDEBAR_TEXT_WIDTH)
+        fetchGoal(slot.sessionID)
+        const lines = () => objectiveLines(goalOf(slot.sessionID), SIDEBAR_TEXT_WIDTH)
         return (
           <>
             {lines() ? (

@@ -27,6 +27,11 @@ const badges: Record<Status, (goal: Goal, running: boolean) => Badge | undefined
 export const goalBadge = (goal: Goal | undefined, running: boolean): Badge | undefined =>
   goal && badges[goal.status](goal, running)
 
+export const editedObjective = (original: string, text: string): string | undefined => {
+  const objective = text.trim()
+  return objective && objective !== original.trim() ? objective : undefined
+}
+
 const OBJECTIVE_LINES = 3
 
 const wrap = (text: string, width: number) => {

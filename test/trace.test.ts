@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Goal } from "../src/goal.ts"
-import { commandRecord, errorRecord, logEnabled, toolErrorRecord, transitionRecord } from "../src/trace.ts"
+import { commandRecord, errorRecord, logEnabled, sessionOf, toolErrorRecord, transitionRecord } from "../src/trace.ts"
 
 const AT = 1_792_000_000_000
 
@@ -190,4 +190,26 @@ test.each([
   ["on with the log option", { log: true }, {}, true],
 ] as const)("logEnabled: %s", (_name, options, env, expected) => {
   expect(logEnabled(options, env)).toBe(expected)
+})
+
+test.each([
+  ["a session event", { data: { sessionID: "ses_1" } }, "ses_1"],
+  ["an event without a session", { data: { location: "/repo" } }, undefined],
+  ["an event without data", {}, undefined],
+  ["a session ID that is not a string", { data: { sessionID: 7 } }, undefined],
+] as const)("sessionOf: %s", (_name, event, expected) => {
+  expect(sessionOf(event)).toBe(expected)
+})
+
+test("a refused command is recorded with the Refuse effect", () => {
+  expect(transitionRecord("ses_1", { _tag: "Pause" }, undefined, undefined, { _tag: "Refuse", text: "No goal is set for this session." }, AT)).toStrictEqual({
+    _tag: "Transition",
+    at: AT,
+    sessionID: "ses_1",
+    event: "Pause",
+    from: "none",
+    to: "none",
+    effect: "Refuse",
+    text: "No goal is set for this session.",
+  })
 })

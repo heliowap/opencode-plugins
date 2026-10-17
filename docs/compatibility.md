@@ -4,7 +4,7 @@ Every claim here comes from a real `opencode serve` process with no mocked plugi
 
 ## Host canaries (deterministic)
 
-`host/*.test.ts` runs OpenCode 2.0.24 against a scripted OpenAI-compatible fixture provider (`host/harness/fixture.ts`). The fixture controls each reply, its timing, errors, and the exact token usage, so these results reproduce on every run. A8b–A8e load `host/harness/no-host-retry`, which turns off OpenCode's own provider retries, and set `GOAL_RETRY_DELAYS_MS` to shorten the plugin's waits. CI runs one runner per file on Linux. They also pass locally on macOS arm64.
+`host/*.test.ts` runs OpenCode 2.0.24 against a scripted OpenAI-compatible fixture provider (`host/harness/fixture.ts`). The fixture controls each reply, its timing, errors, and the exact token usage, so these results reproduce on every run. A8b–A8e load `host/harness/no-host-retry`, which turns off OpenCode's own provider retries, and pass the `retryDelaysMs` plugin option to shorten the plugin's waits. CI runs one runner per file on Linux. They also pass locally on macOS arm64.
 
 | # | Scenario | Result | Graded on |
 |---|---|---|---|

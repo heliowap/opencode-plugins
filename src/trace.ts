@@ -1,7 +1,9 @@
 import type { GoalCommand } from "./command.ts"
-import type { Goal, GoalEffect, GoalEvent } from "./goal.ts"
+import type { Goal, GoalEffect, GoalEvent, Status } from "./goal.ts"
 
-type GoalState = Goal["status"] | "none"
+type GoalState = Status | "none"
+
+export type GoalTool = "goal_create" | "goal_get" | "goal_update"
 
 export type TraceRecord =
   | {
@@ -27,7 +29,7 @@ export type TraceRecord =
       readonly result: GoalCommand["_tag"]
       readonly message?: string
     }
-  | { readonly _tag: "ToolError"; readonly at: number; readonly sessionID: string; readonly tool: string; readonly message: string }
+  | { readonly _tag: "ToolError"; readonly at: number; readonly sessionID: string; readonly tool: GoalTool; readonly message: string }
   | { readonly _tag: "Error"; readonly at: number; readonly sessionID?: string; readonly where: string; readonly cause: string }
 
 export const transitionRecord = (
@@ -54,7 +56,7 @@ export const transitionRecord = (
     ...("objective" in event && { objective: event.objective }),
     ...("status" in event && { status: event.status }),
     ...(effect._tag === "Retry" && { attempt: effect.attempt }),
-    ...(effect._tag === "Notify" && { text: effect.text }),
+    ...((effect._tag === "Notify" || effect._tag === "Refuse") && { text: effect.text }),
   }
 }
 
@@ -67,7 +69,7 @@ export const commandRecord = (sessionID: string, text: string, command: GoalComm
   ...(command._tag === "Invalid" && { message: command.message }),
 })
 
-export const toolErrorRecord = (sessionID: string, tool: string, message: string, at: number): TraceRecord => ({
+export const toolErrorRecord = (sessionID: string, tool: GoalTool, message: string, at: number): TraceRecord => ({
   _tag: "ToolError",
   at,
   sessionID,
@@ -82,6 +84,11 @@ export const errorRecord = (where: string, cause: string, sessionID: string | un
   where,
   cause,
 })
+
+export const sessionOf = (event: { readonly data?: unknown }) => {
+  const sessionID = (event.data as { readonly sessionID?: unknown } | undefined)?.sessionID
+  return typeof sessionID === "string" ? sessionID : undefined
+}
 
 export const logEnabled = (options: { readonly log?: unknown }, env: Readonly<Record<string, string | undefined>>) =>
   options.log !== false && env.OPENCODE_GOAL_LOG !== "0" && env.OPENCODE_GOAL_LOG !== "false"

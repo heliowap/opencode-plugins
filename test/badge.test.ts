@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { goalBadge, objectiveLines } from "../src/badge.ts"
+import { editedObjective, goalBadge, objectiveLines } from "../src/badge.ts"
 import type { Goal } from "../src/goal.ts"
 
 const goal = (overrides: Partial<Goal> = {}): Goal => ({
@@ -50,4 +50,13 @@ test("objectiveLines shows paused and blocked goals and hides complete ones and 
   expect(objectiveLines(goal({ status: "blocked" }), 10)).toEqual(["ship it"])
   expect(objectiveLines(goal({ status: "complete" }), 10)).toBeUndefined()
   expect(objectiveLines(undefined, 10)).toBeUndefined()
+})
+
+test.each([
+  ["a changed objective, trimmed", "ship it", "  ship it today \n", "ship it today"],
+  ["unchanged text", "ship it", "ship it", undefined],
+  ["unchanged apart from surrounding whitespace", " ship it ", "ship it", undefined],
+  ["an emptied editor", "ship it", "  \n ", undefined],
+] as const)("editedObjective: %s", (_name, original, text, expected) => {
+  expect(editedObjective(original, text)).toBe(expected)
 })

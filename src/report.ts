@@ -1,15 +1,25 @@
 import type { TraceRecord } from "./trace.ts"
 
-const CUT = 120
+const LIMIT = 120
 
-const cut = (text: string) => (text.length > CUT ? `${text.slice(0, CUT - 1)}…` : text)
+const truncate = (text: string) => (text.length > LIMIT ? `${text.slice(0, LIMIT - 1)}…` : text)
 
 const time = (record: TraceRecord) => new Date(record.at).toISOString()
+
+const TAGS = new Set(["Transition", "Command", "ToolError", "Error"])
+
+// The log is plain JSON on disk: keep only lines that carry a known tag and a timestamp. A line that
+// is not an object throws here, and parse drops it.
+const isRecord = (value: unknown): value is TraceRecord => {
+  const record = value as { readonly _tag?: unknown; readonly at?: unknown }
+  return typeof record.at === "number" && TAGS.has(record._tag as string)
+}
 
 const parse = (lines: readonly string[]) =>
   lines.flatMap((line) => {
     try {
-      return [JSON.parse(line) as TraceRecord]
+      const value: unknown = JSON.parse(line)
+      return isRecord(value) ? [value] : []
     } catch {
       return []
     }
@@ -19,7 +29,13 @@ const describe = (record: TraceRecord) => {
   switch (record._tag) {
     case "Transition": {
       const detail =
-        record.objective !== undefined ? ` objective: ${cut(record.objective)}` : record.note !== undefined ? ` note: ${cut(record.note)}` : ""
+        record.objective !== undefined
+          ? ` objective: ${truncate(record.objective)}`
+          : record.note !== undefined
+            ? ` note: ${truncate(record.note)}`
+            : record.effect === "Refuse"
+              ? ` ${record.text}`
+              : ""
       return `${record.event}: ${record.from} -> ${record.to} [${record.effect}]${detail}`
     }
     case "Command":
@@ -33,14 +49,20 @@ const describe = (record: TraceRecord) => {
 
 const count = <T>(items: readonly T[], match: (item: T) => boolean) => items.filter(match).length
 
+// Only commands carry a result, and only transitions an effect.
+const isRefusal = (record: TraceRecord) => {
+  const fields = record as { readonly result?: string; readonly effect?: string }
+  return fields.result === "Invalid" || fields.effect === "Refuse"
+}
+
 const sessionRow = (sessionID: string, records: readonly TraceRecord[]) => {
   const transitions = records.flatMap((record) => (record._tag === "Transition" ? [record] : []))
   const status = transitions.at(-1)?.to ?? "unknown"
+  const commands = count(records, (record) => record._tag === "Command")
+  const refused = count(records, isRefusal)
   const toolErrors = count(records, (record) => record._tag === "ToolError")
   const errors = count(records, (record) => record._tag === "Error")
-  const commands = records.flatMap((record) => (record._tag === "Command" ? [record] : []))
-  const refused = count(commands, (command) => command.result === "Invalid")
-  return `${sessionID}  ${status}  ${records.length} records  ${commands.length} commands (${refused} refused)  ${toolErrors} tool errors  ${errors} errors  last ${time(records.at(-1)!)}`
+  return `${sessionID}  ${status}  ${records.length} records  ${commands} commands (${refused} refused)  ${toolErrors} tool errors  ${errors} errors  last ${time(records.at(-1)!)}`
 }
 
 export const summarize = (lines: readonly string[], sessionID?: string) => {
