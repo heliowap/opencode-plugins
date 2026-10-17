@@ -32,6 +32,8 @@ Every claim here comes from a real `opencode serve` process with no mocked plugi
 | A12d | A location reload during a `plan` turn keeps that turn uncounted | ✅ after #10 | stored `tokensUsed: 0`, `emptyTurns: 0` |
 | A13 | Deleting a session removes its goal | ✅ | no stored goal, exactly one `goal.changed` with `goal: null` |
 | A16 | A goal follows its session to a new directory | ✅ after #11 | stored `directory` updated, then `complete` after resume there |
+| L1 | The trace log records typed commands (refused ones too), transitions, and failed tool calls | ✅ | exact records read from `goal.jsonl` in the isolated data directory |
+| L2 | `OPENCODE_GOAL_LOG=0` writes no log | ✅ | no `goal.jsonl` after the same scenario |
 | H1 | A goal created through `opencode run --server` is finished by the server after the command exits | ✅ | real `opencode run --format json` and `opencode api` against the canary server, goal read through the `goal.get` RPC as `complete`, `a.txt`/`b.txt` contents, exactly 8 model requests |
 | H2 | `opencode run --standalone` stops the goal after its first turn | ⚠️ known limitation | stored `active`, no `a.txt`/`b.txt`, fewer than 8 model requests. The command returns after its first turn and its private server exits with it |
 | V1 | `--verify` refuses completion until the command exits 0 in the goal's directory | ✅ | first tool result names exit code 3 and the output, stored `complete` with `verifyFailures: 1`, `lastExitCode: 0` |

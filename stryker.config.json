@@ -2,7 +2,7 @@
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "command",
   "commandRunner": { "command": "bun test --bail" },
-  "mutate": ["src/goal.ts", "src/command.ts", "src/prompts.ts", "src/badge.ts", "src/format.ts"],
+  "mutate": ["src/goal.ts", "src/command.ts", "src/prompts.ts", "src/badge.ts", "src/format.ts", "src/trace.ts", "src/report.ts"],
   "coverageAnalysis": "off",
   "reporters": ["clear-text", "progress", "json"],
   "jsonReporter": { "fileName": "reports/mutation/mutation.json" },
