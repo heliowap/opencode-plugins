@@ -23,7 +23,7 @@ This installs the plugin and adds it to your global `opencode.jsonc`. If `/goal`
 | Status above the input, objective in the sidebar, `/goal edit` editor, and terminal UI controls for token budget, pause, and clear | Verified by 8 canaries on OpenCode 2.0.24, the version CI pins, that drive the real `opencode` terminal in tmux, with keys and mouse clicks, and read the screen. The reducer and RPC tests cover the other controls. |
 | Headless `opencode run` | Works against a running server (`--server` or the background service). With `--standalone` the goal stops after the first turn, see [Headless runs](#headless-runs) |
 | Live models | `devin/swe-2`, `gemini-3.8-flash`, and the free `nemotron-3.5-lightning-free` complete real goals, stop at budgets, and survive a restart |
-| `/goal` typed in the terminal UI | `/goal edit` is typed in the real terminal by a canary; the other subcommands are not established there, but the goal controls cover pause, budget, and clear |
+| `/goal` typed in the terminal UI | Only `/goal edit` is typed in the real terminal by a canary; the goal controls cover the other changes without typing |
 | Desktop and web apps, Windows, other OpenCode versions | Not established |
 
 Details, session evidence, and what is not proven: [`docs/compatibility.md`](docs/compatibility.md).
@@ -59,7 +59,7 @@ The session sidebar shows the objective of an unfinished goal at its bottom, nex
 
 `/goal edit` without an objective, or a click on the sidebar's `Goal` title, opens the full objective in an editor dialog. `ctrl+s` saves it, `esc` discards the change. Clients without the terminal UI, such as `opencode run`, need `/goal edit <objective>`.
 
-Clicking the line above the input, or running `Goal controls` from the command palette (`ctrl+p`), opens the goal controls: pause or resume, edit the objective, set or remove the token budget (`50K`, `1.5M`, empty for no limit) and the verify command, and clear the goal after a confirm. Raising the budget of a goal that ran out resumes it. Creating a goal still takes `/goal <objective>`.
+Clicking the line above the input, or running `Goal controls` from the command palette (`ctrl+p`), opens the goal controls: pause or resume, edit the objective, set or remove the token budget (`50K`, `1.5M`, empty for no limit) and the verify command, and clear the goal after a confirm. Raising the budget of a goal that ran out resumes it. Until then, an out-of-budget goal offers only the budget, verify, and clear controls. Creating a goal still takes `/goal <objective>`.
 
 The agent can also create, read, and finish goals with the `goal_create`, `goal_get`, and `goal_update` tools. `goal_get` also returns the `/goal` syntax, so the agent can answer questions about the command.
 
@@ -108,9 +108,11 @@ until opencode api --server http://127.0.0.1:4096 post "/api/rpc/goal/get?locati
   -d "{\"input\":{\"sessionID\":\"$id\"}}" | grep -qv '"status":"active"'; do sleep 10; done
 ```
 
-## Known limitation
+## Known limitations
 
-Replies to `/goal`, `pause`, `resume`, `edit`, and `clear` are queued as synthetic messages. When the session is idle they show up at the start of the next turn, not immediately.
+Replies to `/goal` and to the goal controls are queued as synthetic messages. When the session is idle they show up at the start of the next turn, not immediately.
+
+Changing the budget of an existing goal takes the goal controls in the terminal UI, or the `goal/apply` RPC with a `Budget` action. The `/goal` syntax has no budget-only form; `/goal --tokens <n> <objective>` replaces the goal instead.
 
 ## Attribution
 
@@ -136,6 +138,6 @@ OpenCode reloads the plugin when you save files under `src/`.
 bun test                      # unit tests, 100% line and function coverage enforced
 bun run typecheck
 bun run mutation              # mutation testing: every mutant of the files in stryker.config.json must be killed
-bun test ./host               # host canaries: needs `opencode` 2.0.24 on PATH
+bun test ./host               # host canaries: needs `opencode` 2.0.24 on PATH and `tmux` for the terminal ones
 LIVE_MODEL="<provider>/<model>" bun test ./host/live/live.test.ts   # live models, uses your provider config
 ```
