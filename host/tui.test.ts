@@ -65,12 +65,14 @@ const click = (pattern: RegExp) => {
   type("-l", `\x1b[<0;${cell}M\x1b[<0;${cell}m`)
 }
 
+const SPINNER_FRAMES: readonly string[] = ["◐", "◓", "◑", "◒"]
+
 const sampledGlyphs = async (glyph: () => string | undefined) => {
   const glyphs = new Set<string>()
-  const sampled = Date.now() + 1_500
-  while (Date.now() < sampled) {
+  const deadline = Date.now() + 5_000
+  while (Date.now() < deadline && glyphs.size < SPINNER_FRAMES.length) {
     const seen = glyph()
-    if (seen !== undefined) glyphs.add(seen)
+    if (seen !== undefined && SPINNER_FRAMES.includes(seen)) glyphs.add(seen)
     await Bun.sleep(50)
   }
   return [...glyphs].sort()
