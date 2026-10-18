@@ -19,11 +19,11 @@ This installs the plugin and adds it to your global `opencode.jsonc`. If `/goal`
 
 | Surface | Status |
 |---|---|
-| OpenCode 2.0.24 | Verified by 35 host canaries against a real `opencode serve`, graded on stored state. They run in CI on every push. |
-| Status above the input, objective in the sidebar, `/goal edit` editor (terminal UI) | Verified by 3 canaries that drive the real `opencode` terminal in tmux and read the screen |
+| OpenCode 2.0.24 | Verified by 39 host canaries against a real `opencode serve`, graded on stored state. They run in CI on every push. |
+| Status above the input, objective in the sidebar, `/goal edit` editor, and terminal UI controls for token budget, pause, and clear | Verified by 8 canaries on OpenCode 2.0.24, the version CI pins, that drive the real `opencode` terminal in tmux, with keys and mouse clicks, and read the screen. The reducer and RPC tests cover the other controls. |
 | Headless `opencode run` | Works against a running server (`--server` or the background service). With `--standalone` the goal stops after the first turn, see [Headless runs](#headless-runs) |
 | Live models | `devin/swe-2`, `gemini-3.8-flash`, and the free `nemotron-3.5-lightning-free` complete real goals, stop at budgets, and survive a restart |
-| `/goal` typed in the terminal UI | `/goal edit` is typed in the real terminal by a canary; the other subcommands are not established there |
+| `/goal` typed in the terminal UI | `/goal edit` is typed in the real terminal by a canary; the other subcommands are not established there, but the goal controls cover pause, budget, and clear |
 | Desktop and web apps, Windows, other OpenCode versions | Not established |
 
 Details, session evidence, and what is not proven: [`docs/compatibility.md`](docs/compatibility.md).
@@ -46,16 +46,20 @@ In the terminal UI, a line above the input shows the goal of the open session:
 
 | Goal | Line |
 |---|---|
-| Active, turn running | `◎ goal running · 12K / 50K` |
+| Active, turn running | `◐ goal running · 12K / 50K` |
 | Active, between turns | `◎ goal active · 12K / 50K` |
 | Paused | `⏸ goal paused` |
 | Blocked | `⚠ goal blocked` |
 | Out of budget | `goal budget reached · 52K / 50K` |
 | Complete, or no goal | nothing |
 
-The session sidebar shows the objective of an unfinished goal at its bottom, next to the input, cut to three lines.
+While a turn runs, the first glyph turns through `◐ ◓ ◑ ◒`, about every 150 ms.
 
-`/goal edit` without an objective opens the full objective in an editor dialog. `ctrl+s` saves it, `esc` discards the change. Clients without the terminal UI, such as `opencode run`, need `/goal edit <objective>`.
+The session sidebar shows the objective of an unfinished goal at its bottom, next to the input, cut to three lines. Its `Goal` title spins like the line above the input while a turn runs.
+
+`/goal edit` without an objective, or a click on the sidebar's `Goal` title, opens the full objective in an editor dialog. `ctrl+s` saves it, `esc` discards the change. Clients without the terminal UI, such as `opencode run`, need `/goal edit <objective>`.
+
+Clicking the line above the input, or running `Goal controls` from the command palette (`ctrl+p`), opens the goal controls: pause or resume, edit the objective, set or remove the token budget (`50K`, `1.5M`, empty for no limit) and the verify command, and clear the goal after a confirm. Raising the budget of a goal that ran out resumes it. Creating a goal still takes `/goal <objective>`.
 
 The agent can also create, read, and finish goals with the `goal_create`, `goal_get`, and `goal_update` tools. `goal_get` also returns the `/goal` syntax, so the agent can answer questions about the command.
 

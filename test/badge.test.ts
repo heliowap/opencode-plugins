@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { editedObjective, goalBadge, objectiveLines } from "../src/badge.ts"
+import { dialogTitle, editedObjective, goalBadge, objectiveLines, sidebarTitle } from "../src/badge.ts"
 import type { Goal } from "../src/goal.ts"
 
 const goal = (overrides: Partial<Goal> = {}): Goal => ({
@@ -15,21 +15,31 @@ const goal = (overrides: Partial<Goal> = {}): Goal => ({
 })
 
 test.each([
-  ["an active goal with a turn running", goal(), true, { text: "◎ goal running · 12K / 50K", tone: "accent" }],
+  ["an active goal with a turn running", goal(), true, { text: "◐ goal running · 12K / 50K", tone: "accent" }],
   ["an active goal between turns", goal(), false, { text: "◎ goal active · 12K / 50K", tone: "muted" }],
-  ["an active goal without a budget", goal({ tokenBudget: null, tokensUsed: 1_500 }), true, { text: "◎ goal running · 1.5K", tone: "accent" }],
+  ["an active goal without a budget", goal({ tokenBudget: null, tokensUsed: 1_500 }), true, { text: "◐ goal running · 1.5K", tone: "accent" }],
   ["a paused goal", goal({ status: "paused" }), false, { text: "⏸ goal paused", tone: "warning" }],
   ["a paused goal while its last turn finishes", goal({ status: "paused" }), true, { text: "⏸ goal paused", tone: "warning" }],
   ["a blocked goal", goal({ status: "blocked" }), false, { text: "⚠ goal blocked", tone: "error" }],
   ["a goal over budget", goal({ status: "budget_limited", tokensUsed: 52_000 }), false, { text: "goal budget reached · 52K / 50K", tone: "warning" }],
 ] as const)("%s", (_name, input, running, expected) => {
-  expect(goalBadge(input, running)).toEqual(expected)
+  expect(goalBadge(input, running, 0)).toEqual(expected)
 })
 
 test("a complete goal shows nothing, and neither does a session without a goal", () => {
-  expect(goalBadge(goal({ status: "complete" }), false)).toBeUndefined()
-  expect(goalBadge(undefined, true)).toBeUndefined()
-  expect(goalBadge(goal(), false)).toEqual({ text: "◎ goal active · 12K / 50K", tone: "muted" })
+  expect(goalBadge(goal({ status: "complete" }), false, 0)).toBeUndefined()
+  expect(goalBadge(undefined, true, 0)).toBeUndefined()
+  expect(goalBadge(goal(), false, 0)).toEqual({ text: "◎ goal active · 12K / 50K", tone: "muted" })
+})
+
+test("a running goal cycles through the quarter-circle frames", () => {
+  const glyphs = [0, 1, 2, 3, 4].map((frame) => goalBadge(goal(), true, frame)?.text.split(" ")[0])
+  expect(glyphs).toEqual(["◐", "◓", "◑", "◒", "◐"])
+})
+
+test("only a running goal animates", () => {
+  expect(goalBadge(goal(), false, 2)).toEqual({ text: "◎ goal active · 12K / 50K", tone: "muted" })
+  expect(goalBadge(goal({ status: "paused" }), true, 2)).toEqual({ text: "⏸ goal paused", tone: "warning" })
 })
 
 test.each([
@@ -59,4 +69,19 @@ test.each([
   ["an emptied editor", "ship it", "  \n ", undefined],
 ] as const)("editedObjective: %s", (_name, original, text, expected) => {
   expect(editedObjective(original, text)).toBe(expected)
+})
+
+test("sidebarTitle animates only while running", () => {
+  expect(sidebarTitle(true, 0)).toBe("◐ Goal")
+  expect(sidebarTitle(true, 4)).toBe("◐ Goal")
+  expect(sidebarTitle(false, 2)).toBe("Goal")
+})
+
+test.each([
+  ["active", "Goal · active"],
+  ["paused", "Goal · paused"],
+  ["blocked", "Goal · blocked"],
+  ["budget_limited", "Goal · budget reached"],
+] as const)("dialogTitle for a %s goal", (status, expected) => {
+  expect(dialogTitle(goal({ status }))).toBe(expected)
 })

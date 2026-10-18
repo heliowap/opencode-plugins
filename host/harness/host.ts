@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite"
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { statSync } from "node:fs"
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { Goal } from "../../src/goal.ts"
@@ -25,6 +26,8 @@ export interface Session {
 
 export type Message = { readonly type: string; readonly text?: string; readonly outcome?: string } & Record<string, unknown>
 
+class PluginInstallError extends Error {}
+
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms))
 
 const freePort = () => {
@@ -44,9 +47,28 @@ export class Host {
     readonly env: Record<string, string>,
     private process: ReturnType<typeof Bun.spawn>,
     private readonly logs: string[],
+    private logOffset: number,
   ) {}
 
   static async start(options: HostOptions): Promise<Host> {
+    try {
+      return await Host.launch(options)
+    } catch (error) {
+      // OpenCode reports a plugin install failure only in its own log, and installs fail transiently, so tolerate one relaunch.
+      if (!(error instanceof PluginInstallError)) throw error
+      return Host.launch(options)
+    }
+  }
+
+  private static logSize(env: Record<string, string>) {
+    try {
+      return statSync(join(env.XDG_DATA_HOME!, "opencode", "log", "opencode.log")).size
+    } catch {
+      return 0
+    }
+  }
+
+  private static async launch(options: HostOptions): Promise<Host> {
     const root = await mkdtemp(join(tmpdir(), "goal-host-"))
     const project = join(root, "project")
     const config = join(root, "config", "opencode")
@@ -96,8 +118,24 @@ export class Host {
     delete env.BUN_BE_BUN
     const port = freePort()
     const logs: string[] = []
-    const host = new Host(root, project, fixture, model, `http://127.0.0.1:${port}`, env, Host.spawn(env, project, port, logs), logs)
-    await host.ready()
+    const logOffset = Host.logSize(env)
+    const host = new Host(
+      root,
+      project,
+      fixture,
+      model,
+      `http://127.0.0.1:${port}`,
+      env,
+      Host.spawn(env, project, port, logs),
+      logs,
+      logOffset,
+    )
+    try {
+      await host.ready()
+    } catch (error) {
+      await host.stop()
+      throw error
+    }
     return host
   }
 
@@ -126,6 +164,10 @@ export class Host {
       await sleep(100)
     }
     for (let attempt = 0; attempt < 1_800; attempt++) {
+      if (this.process.exitCode !== null) throw new Error(`opencode serve exited:\n${this.logs.join("")}`)
+      const log = (await readFile(join(this.env.XDG_DATA_HOME!, "opencode", "log", "opencode.log")).catch(() => null)) ?? Buffer.alloc(0)
+      const logs = this.logs.join("") + log.subarray(this.logOffset).toString("utf8")
+      if (logs.includes("failed to load plugin")) throw new PluginInstallError(`opencode serve failed to load a plugin:\n${logs}`)
       const commands = (await this.json("GET", `/api/command?location[directory]=${encodeURIComponent(this.project)}`)) as {
         data?: { name: string }[]
       }
@@ -268,6 +310,7 @@ export class Host {
     this.process.kill()
     await this.process.exited
     const port = Number(new URL(this.base).port)
+    this.logOffset = Host.logSize(this.env)
     this.process = Host.spawn(this.env, this.project, port, this.logs)
     await this.ready()
   }

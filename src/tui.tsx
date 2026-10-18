@@ -2,8 +2,9 @@
 import type { TextareaRenderable } from "@opentui/core"
 import { Plugin } from "@opencode/plugin/tui"
 import type { Context } from "@opencode/plugin/tui/context"
-import { editedObjective, goalBadge, objectiveLines, type Tone } from "./badge.ts"
-import { decodeGoal, type Goal } from "./goal.ts"
+import { dialogTitle, editedObjective, goalBadge, objectiveLines, sidebarTitle, SPIN_INTERVAL_MS, type Tone } from "./badge.ts"
+import { budgetEvent, controlEvent, controlsFor, verifyEvent } from "./controls.ts"
+import { decodeGoal, type Goal, type GoalEvent } from "./goal.ts"
 import { GoalRpc } from "./rpc.ts"
 
 // Installed packages resolve `solid-js` to their own copy, which the host renderer does not track.
@@ -73,6 +74,7 @@ export default Plugin.define({
   setup(context) {
     const rpc = context.client.rpc(GoalRpc)
     const [goals, update] = context.storage.memory("goals", { initial: {} as Record<string, Goal | null> })
+    const [spin, advance] = context.storage.memory("spinner", { initial: { frame: 0 } })
     const remember = (sessionID: string, goal: unknown) =>
       update((draft) => {
         draft[sessionID] = decodeGoal(goal) ?? null
@@ -84,6 +86,73 @@ export default Plugin.define({
         if (!(sessionID in goals)) remember(sessionID, (result as { goal: unknown }).goal)
       })
     }
+
+    const act = (sessionID: string, action: GoalEvent) =>
+      void rpc
+        .apply({ sessionID, action })
+        .catch(() => context.ui.toast.show({ message: "The goal could not be changed.", variant: "error" }))
+
+    const openControls = async (sessionID: string) => {
+      const goal = goalOf(sessionID)
+      const controls = goal ? controlsFor(goal) : []
+      if (!goal || controls.length === 0) {
+        context.ui.toast.show({ message: "This session has no unfinished goal.", variant: "info" })
+        return
+      }
+      const id = await context.ui.dialog.select({
+        title: dialogTitle(goal),
+        options: controls.map((control) => ({ title: control.title, value: control.id, description: control.description })),
+      })
+      const value = controls.find((control) => control.id === id)?.value
+      switch (id) {
+        case "pause":
+        case "resume":
+        case "edit":
+          return act(sessionID, controlEvent(id)!)
+        case "budget": {
+          const text = await context.ui.dialog.prompt({
+            title: "Token budget",
+            description: "Such as 50K or 1.5M. Empty removes the limit.",
+            value,
+          })
+          if (text === undefined) return
+          const event = budgetEvent(text)
+          if (event) return act(sessionID, event)
+          return context.ui.toast.show({ message: "Token budget needs a positive number such as 50K or 1.5M.", variant: "error" })
+        }
+        case "verify": {
+          const text = await context.ui.dialog.prompt({
+            title: "Verify command",
+            description: "Run before a goal completes. Empty removes it.",
+            value,
+          })
+          if (text !== undefined) act(sessionID, verifyEvent(text))
+          return
+        }
+        case "clear":
+          if (await context.ui.dialog.confirm({ title: "Clear goal?", message: "The objective and its token usage are deleted." })) {
+            act(sessionID, controlEvent(id)!)
+          }
+      }
+    }
+
+    context.keymap.layer(() => ({
+      // The palette is a modal, so a base-mode command is unreachable while it lists commands.
+      mode: "global",
+      commands: [
+        {
+          id: "goal.controls",
+          title: "Goal controls",
+          group: "Goal",
+          palette: true,
+          enabled: () => context.ui.router.current().type === "session",
+          run: () => {
+            const route = context.ui.router.current()
+            if (route.type === "session") void openControls(route.sessionID)
+          },
+        },
+      ],
+    }))
 
     const stopChanged = rpc.events.on("changed", (event) => {
       const data = event.data as { sessionID: string; goal: unknown }
@@ -98,11 +167,7 @@ export default Plugin.define({
         <EditGoal
           context={context}
           objective={objective}
-          save={(next) =>
-            void rpc
-              .edit({ sessionID, objective: next })
-              .catch(() => context.ui.toast.show({ message: "The goal could not be saved.", variant: "error" }))
-          }
+          save={(next) => act(sessionID, { _tag: "Edit", objective: next })}
         />
       ))
       context.ui.dialog.set({ size: "large" })
@@ -112,13 +177,17 @@ export default Plugin.define({
       append: "session.composer.top",
       render: (slot) => {
         fetchGoal(slot.sessionID)
-        const badge = () =>
-          goalBadge(goalOf(slot.sessionID), context.data.session.status(slot.sessionID) === "running")
+        const badge = () => {
+          const running = context.data.session.status(slot.sessionID) === "running"
+          return goalBadge(goalOf(slot.sessionID), running, running ? spin.frame : 0)
+        }
         return (
           <>
             {badge() ? (
               <box flexShrink={0} paddingLeft={1}>
-                <text fg={color(context, badge()!.tone)}>{badge()!.text}</text>
+                <text fg={color(context, badge()!.tone)} onMouseUp={() => void openControls(slot.sessionID)}>
+                  {badge()!.text}
+                </text>
               </box>
             ) : null}
           </>
@@ -131,12 +200,16 @@ export default Plugin.define({
       render: (slot) => {
         fetchGoal(slot.sessionID)
         const lines = () => objectiveLines(goalOf(slot.sessionID), SIDEBAR_TEXT_WIDTH)
+        const title = () => {
+          const running = context.data.session.status(slot.sessionID) === "running"
+          return sidebarTitle(running, running ? spin.frame : 0)
+        }
         return (
           <>
             {lines() ? (
               <box flexShrink={0}>
-                <text fg={context.theme.text.base}>
-                  <b>Goal</b>
+                <text fg={context.theme.text.base} onMouseUp={() => act(slot.sessionID, { _tag: "EditRequested" })}>
+                  <b>{title()}</b>
                 </text>
                 {lines()!.map((line) => (
                   <text fg={context.theme.text.muted}>{line}</text>
@@ -148,7 +221,14 @@ export default Plugin.define({
       },
     })
 
+    const ticker = setInterval(() => {
+      advance((draft) => {
+        draft.frame += 1
+      })
+    }, SPIN_INTERVAL_MS)
+
     return () => {
+      clearInterval(ticker)
       stopChanged()
       stopEdit()
     }
