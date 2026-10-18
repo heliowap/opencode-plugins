@@ -80,6 +80,17 @@ const sampledGlyphs = async (glyph: () => string | undefined) => {
 
 const running = (usage: string) => new RegExp(`^[◐◓◑◒] goal running · ${usage}$`)
 
+const openGoalControls = async () => {
+  type("C-p")
+  await sees(["Commands"])
+  type("-l", "Goal controls")
+  await waitFor(
+    () => screen().split("\n").some((line) => /Goal controls\s+Goal\s*$/.test(line)),
+    "the palette never listed the Goal controls command.",
+  )
+  type("Enter")
+}
+
 describe.skipIf(!tmux && !process.env.CI)("status above the input in the terminal UI", () => {
   test(
     "T1 running with usage, then paused, then gone after clear",
@@ -287,9 +298,7 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       open(session)
 
       await shows("⏸ goal paused")
-      type("C-p")
-      type("-l", "Goal controls")
-      type("Enter")
+      await openGoalControls()
       await sees(["Resume goal", "Clear goal"])
       type("-l", "Clear goal")
       type("Enter")
@@ -308,13 +317,14 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
         ...(process.env.GOAL_PLUGIN_SPEC && { pluginSpec: process.env.GOAL_PLUGIN_SPEC }),
       })
       const session = await host.session()
+      await host.prompt(session, "hello")
+      await host.settle(session)
       open(session)
 
-      await sees(["ctrl+p commands"])
-      type("C-p")
-      type("-l", "Goal controls")
-      type("Enter")
+      await sees(["hello"])
+      await openGoalControls()
       await sees(["This session has no unfinished goal."])
+      expect(host.stored(session)).toBeUndefined()
     },
     TIMEOUT,
   )
