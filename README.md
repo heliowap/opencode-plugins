@@ -39,8 +39,12 @@ There is no automatic approval based on an agent's answer.
   - `edit` permissions (edit, write, patch) whose target file is named
     `AGENTS.md` in any letter case, in any directory, including relative paths,
     `~` paths, symlinks and files that do not exist yet;
-  - shell commands whose text mentions `AGENTS.md` in any letter case,
-    unless the complete command matches a supported read-only form.
+  - shell commands whose text shows a write to a file named `AGENTS.md` in
+    any letter case: a redirect (`>`, `>>`, `&>`, `<>`) or `--output`/`-o`
+    option targeting it, `tee`, `mv`, `cp`, `rm`, `ln`, `touch` and similar
+    writers, `sed -i`/`perl -i`, sed `w` scripts, `git checkout`/`restore`/
+    `rm`/`mv`/`apply`/`stash`/`reset`, `find -exec`/`-delete`, and inline
+    script lines that call a file-writing API on that path.
 
   The denial message tells the agent to ask you first.
 - **Approval.** The agent must ask through the question tool, with exactly
@@ -50,14 +54,12 @@ There is no automatic approval based on an agent's answer.
   only, and lasts until your next message in it.
 - **Works with `session.permissions: autoaccept`.** The plugin denies instead
   of asking, so an auto-accepting client cannot approve the edit for you.
-- **Shell reads.** Supported forms include `cat`, `head`, `tail`, `wc`, `grep`,
-  restricted `sed -n` print scripts, and selected Git inspection commands.
-  Literal quoted paths and bare `~/` paths are supported. A read may pipe into
-  stdin-only filters (`cat`, `head`, `tail`, `wc`, `grep`, `sed -n`,
-  `sort -fnru`), as in `grep -n x AGENTS.md | head -20`.
-  Unknown commands or options, redirects, filters with file arguments, command
-  chains, and command substitutions still need approval when they mention the
-  protected file.
+- **Shell reads.** Every other command runs, including chains such as
+  `cd repo && git log -- AGENTS.md`, `find . -name AGENTS.md`, and queries
+  that mention the name as data. The match is textual and ignores quoting, so
+  a quoted `>` or writer name next to `AGENTS.md` is still denied, while a
+  write whose target the text does not show (a path computed at runtime, a
+  script file) is not caught; use the process guard for that.
   A recognized read does not override other OpenCode permission rules or
   approve later writes.
 

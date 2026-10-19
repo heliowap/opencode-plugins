@@ -87,10 +87,46 @@ test.each<[string, (dir: string) => string]>([
   ["grep piped into head", (dir) => `grep -n Global "${dir}/AGENTS.md" | head -n 5`],
   ["git diff", (dir) => `git diff --no-index -- /dev/null "${dir}/AGENTS.md"`],
   ["git diff context", (dir) => `git diff --no-index -U3 -- /dev/null "${dir}/AGENTS.md"`],
+  ["chain after cd", (dir) => `cd "${dir}" && git rev-parse HEAD 2>/dev/null; wc -l AGENTS.md && cat AGENTS.md`],
+  ["find piped into xargs cat", (dir) => `find "${dir}" -maxdepth 1 -name AGENTS.md -print | xargs cat`],
 ])("a read-only shell %s returns the protected file without approval", async (_name, command) => {
   const outcome = await run((dir) => [[{ tool: "shell", args: { command: command(dir) } }]], undefined)
   expect(outcome).toMatchObject({ changed: false, repoChanged: false, denied: false, forms: 0 })
   expect(outcome.results.join("\n")).toContain("# Global rules")
+}, 60_000)
+
+// Shapes of commands the former read-only allowlist denied in real sessions.
+test.each<[string, (dir: string) => string, string]>([
+  ["find -print", (dir) => `find "${dir}" -maxdepth 1 -name AGENTS.md -print`, "/AGENTS.md"],
+  ["a git chain", (dir) => `git rev-parse HEAD 2>/dev/null || true; find "${dir}" -maxdepth 1 -name AGENTS.md -print && sed -n '1,240p' "${dir}/AGENTS.md"`, "# Global rules"],
+  ["sqlite3 -readonly", (dir) => `sqlite3 "${dir}/t.db" "create table if not exists m(d text); delete from m; insert into m values('x AGENTS.md files are protected')" && sqlite3 -readonly "${dir}/t.db" "select count(*) || ' hits' from m where d like '%AGENTS.md files are protected%'"`, "1 hits"],
+  ["ls -la", (dir) => `cd "${dir}" && ls -la AGENTS.md`, "AGENTS.md"],
+  ["sed -n twice", (dir) => `sed -n 1,200p "${dir}/AGENTS.md"; echo ----; sed -n 1,200p "${dir}/AGENTS.md"`, "----"],
+  ["a read with stderr discarded", (dir) => `cat "${dir}/AGENTS.md" 2>/dev/null || true`, "# Global rules"],
+  ["a copy out of AGENTS.md via redirect", (dir) => `cat "${dir}/AGENTS.md" > "${dir}/copy.md" && cat "${dir}/copy.md"`, "# Global rules"],
+  ["an inline script that reads it", (dir) => `python3 -c "print(open('${dir}/AGENTS.md').read())"`, "# Global rules"],
+])("formerly denied %s runs without approval", async (_name, command, expected) => {
+  const outcome = await run((dir) => [[{ tool: "shell", args: { command: command(dir) } }]], undefined)
+  expect(outcome).toMatchObject({ changed: false, repoChanged: false, denied: false, forms: 0 })
+  expect(outcome.results.join("\n")).toContain(expected)
+}, 60_000)
+
+test.each<[string, (dir: string) => string]>([
+  ["rm", (dir) => `rm -f "${dir}/AGENTS.md"`],
+  ["mv away", (dir) => `mv "${dir}/AGENTS.md" "${dir}/old.md"`],
+  ["cp onto", (dir) => `cp "${dir}/notes.md" "${dir}/AGENTS.md"`],
+  ["tee", (dir) => `printf x | tee "${dir}/AGENTS.md"`],
+  ["truncate", (dir) => `truncate -s 0 "${dir}/AGENTS.md"`],
+  ["find -delete", (dir) => `find "${dir}" -maxdepth 1 -name AGENTS.md -delete`],
+  ["find | xargs rm", (dir) => `find "${dir}" -maxdepth 1 -name AGENTS.md | xargs rm`],
+  ["sort -o", (dir) => `sort -o "${dir}/AGENTS.md" "${dir}/notes.md"`],
+  ["a variable target", (dir) => `F="${dir}/AGENTS.md"; printf x >> "$F"`],
+  ["python write_text", (dir) => `python3 -c "import pathlib; pathlib.Path('${dir}/AGENTS.md').write_text('x')"`],
+])("a shell write with %s remains denied without approval", async (_name, command) => {
+  writeFileSync(join(host.configDir, "notes.md"), "new rules\n")
+  const outcome = await run((dir) => [[{ tool: "shell", args: { command: command(dir) } }]], undefined)
+  expect(existsSync(join(host.configDir, "AGENTS.md"))).toBe(true)
+  expect(outcome).toMatchObject({ changed: false, repoChanged: false, denied: true, forms: 0 })
 }, 60_000)
 
 test.each<[string, (dir: string) => string]>([
