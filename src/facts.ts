@@ -1,50 +1,76 @@
 import { execFile } from "node:child_process"
 
+export type Base =
+  | {
+      readonly state: "behind"
+      readonly ref: string
+      readonly behind: number
+      /** The ref came from the remote's default branch rather than from configuration. */
+      readonly defaulted: boolean
+    }
+  /** A configured ref that this repository does not have. */
+  | { readonly state: "unresolved"; readonly ref: string }
+  /** Nothing configured, and the remote offers no default branch. */
+  | { readonly state: "missing" }
+
+export interface Upstream {
+  readonly ref: string
+  readonly behind: number
+  readonly ahead: number
+}
+
 export interface Facts {
-  readonly repository: boolean
   readonly head: string
   /** Absent when HEAD is detached. */
   readonly branch?: string
   readonly dirty: number
   readonly fetch: "ok" | "failed"
-  /** Absent when no base ref could be resolved. */
-  readonly base?: { readonly ref: string; readonly behind: number }
+  readonly base: Base
   /** Absent when HEAD is detached or the branch tracks nothing. */
-  readonly upstream?: { readonly ref: string; readonly behind: number; readonly ahead: number }
+  readonly upstream?: Upstream
 }
 
-const TIMEOUT = 120_000
+// The result is appended to a prompt the user is waiting on, so a slow network degrades the report
+// instead of the session: a fetch that runs out of time is reported as a failed fetch.
+const FETCH_TIMEOUT = 10_000
+const READ_TIMEOUT = 5_000
+const UNBORN = "(no commits)"
 
 interface Result {
   readonly ok: boolean
   readonly out: string
 }
 
-// Expected failures are part of the diagnosis: a branch with no upstream, a repository with no
+// Expected failures are part of the diagnosis: a branch that tracks nothing, a repository with no
 // remote, a directory that is not a repository. They are returned, not thrown.
-const git = (directory: string, args: ReadonlyArray<string>) =>
+const git = (directory: string, args: ReadonlyArray<string>, timeout = READ_TIMEOUT) =>
   new Promise<Result>((resolve) => {
-    execFile("git", [...args], { cwd: directory, timeout: TIMEOUT }, (error, stdout) =>
+    execFile("git", [...args], { cwd: directory, timeout }, (error, stdout) =>
       resolve({ ok: !error, out: stdout.trim() }),
     )
   })
 
-const baseRef = async (directory: string, configured: string | undefined) => {
-  if (configured) return configured
-  // Falls back to the remote's own default branch, which may not be the branch you work from.
-  const head = await git(directory, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
-  return head.ok ? head.out : undefined
+const behind = async (directory: string, ref: string) => {
+  const result = await git(directory, ["rev-list", "--count", `HEAD..${ref}`])
+  return result.ok ? Number(result.out) : undefined
 }
 
-const base = async (directory: string, configured: string | undefined) => {
-  const ref = await baseRef(directory, configured)
-  if (!ref) return {}
-  const behind = await git(directory, ["rev-list", "--count", `HEAD..${ref}`])
-  if (!behind.ok) return {}
-  return { base: { ref, behind: Number(behind.out) } }
+const readBase = async (directory: string, configured: string | undefined): Promise<Base> => {
+  if (configured) {
+    const count = await behind(directory, configured)
+    return count === undefined
+      ? { state: "unresolved", ref: configured }
+      : { state: "behind", ref: configured, behind: count, defaulted: false }
+  }
+  const fallback = await git(directory, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
+  if (!fallback.ok) return { state: "missing" }
+  const count = await behind(directory, fallback.out)
+  return count === undefined
+    ? { state: "missing" }
+    : { state: "behind", ref: fallback.out, behind: count, defaulted: true }
 }
 
-const upstream = async (directory: string, branch: string | undefined) => {
+const readUpstream = async (directory: string, branch: string | undefined) => {
   if (!branch) return {}
   const ref = await git(directory, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
   if (!ref.ok) return {}
@@ -56,25 +82,25 @@ const upstream = async (directory: string, branch: string | undefined) => {
 }
 
 /**
- * Reads how stale `directory` is. Runs `git fetch --prune` and read-only git commands; it never
- * changes the working tree, the index or any ref.
+ * Reads how stale `directory` is, or returns `undefined` when it is not a git repository. Runs
+ * `git fetch --prune` and read-only git commands; it never changes the working tree, the index or
+ * any ref.
  */
-export const inspect = async (directory: string, configuredBase?: string): Promise<Facts> => {
+export const inspect = async (directory: string, configuredBase?: string): Promise<Facts | undefined> => {
   const repository = await git(directory, ["rev-parse", "--git-dir"])
-  if (!repository.ok) return { repository: false, head: "", dirty: 0, fetch: "failed" }
+  if (!repository.ok) return undefined
 
-  const fetch = await git(directory, ["fetch", "--prune"])
+  const fetch = await git(directory, ["fetch", "--prune"], FETCH_TIMEOUT)
   const head = await git(directory, ["rev-parse", "--short", "HEAD"])
   const branch = await git(directory, ["symbolic-ref", "--quiet", "--short", "HEAD"])
   const status = await git(directory, ["status", "--porcelain"])
 
   return {
-    repository: true,
-    head: head.ok ? head.out : "(no commits)",
+    head: head.ok ? head.out : UNBORN,
     ...(branch.ok ? { branch: branch.out } : {}),
     dirty: status.out === "" ? 0 : status.out.split("\n").length,
     fetch: fetch.ok ? "ok" : "failed",
-    ...(await base(directory, configuredBase)),
-    ...(await upstream(directory, branch.ok ? branch.out : undefined)),
+    base: head.ok ? await readBase(directory, configuredBase) : { state: "missing" },
+    ...(await readUpstream(directory, branch.ok ? branch.out : undefined)),
   }
 }

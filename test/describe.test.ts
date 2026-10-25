@@ -1,24 +1,25 @@
 import { expect, test } from "bun:test"
 import { describe } from "../src/describe.ts"
-import type { Facts } from "../src/facts.ts"
+import type { Base, Facts } from "../src/facts.ts"
+
+const BEHIND: Base = { state: "behind", ref: "origin/dev", behind: 37, defaulted: false }
 
 const facts = (overrides: Partial<Facts> = {}): Facts => ({
-  repository: true,
   head: "f8b803bb3",
   branch: "dev",
   dirty: 0,
   fetch: "ok",
-  base: { ref: "origin/dev", behind: 37 },
+  base: BEHIND,
   upstream: { ref: "origin/dev", behind: 0, ahead: 0 },
   ...overrides,
 })
 
 const GUARD =
-  "No files were changed: this check only ran git fetch --prune and read-only git commands. Do not pull, rebase or merge unless the task asks for it."
+  "No files were changed: this check only ran git fetch --prune and read-only git commands. Do not pull, rebase or merge on your own initiative."
 
 const line = (facts: Facts, prefix: string) =>
   describe(facts)
-    ?.split("\n")
+    .split("\n")
     .find((candidate) => candidate.startsWith(prefix))
 
 test("reports head, stale base, in-sync upstream and a clean worktree", () => {
@@ -41,16 +42,28 @@ test("names a detached HEAD instead of a branch, and drops the upstream line", (
 })
 
 test("says the base is current rather than counting zero commits", () => {
-  expect(line(facts({ base: { ref: "origin/dev", behind: 0 } }), "Base:")).toBe("Base: current with origin/dev.")
+  expect(line(facts({ base: { ...BEHIND, behind: 0 } }), "Base:")).toBe("Base: current with origin/dev.")
 })
 
 test("counts a single commit in the singular", () => {
-  expect(line(facts({ base: { ref: "origin/dev", behind: 1 } }), "Base:")).toBe("Base: 1 commit behind origin/dev.")
+  expect(line(facts({ base: { ...BEHIND, behind: 1 } }), "Base:")).toBe("Base: 1 commit behind origin/dev.")
+})
+
+test("says so when the base ref was defaulted instead of configured", () => {
+  expect(line(facts({ base: { ...BEHIND, ref: "origin/main", defaulted: true } }), "Base:")).toBe(
+    'Base: 37 commits behind origin/main (the remote\'s default branch; set this plugin\'s "base" option to compare against another).',
+  )
 })
 
 test("asks for the base option when no base ref resolves", () => {
-  expect(line(facts({ base: undefined }), "Base:")).toBe(
+  expect(line(facts({ base: { state: "missing" } }), "Base:")).toBe(
     'Base: no base ref resolved; set this plugin\'s "base" option.',
+  )
+})
+
+test("names the configured ref when it is the one that does not resolve", () => {
+  expect(line(facts({ base: { state: "unresolved", ref: "origin/dev" } }), "Base:")).toBe(
+    'Base: origin/dev does not resolve here; check this plugin\'s "base" option.',
   )
 })
 
@@ -83,8 +96,4 @@ test("warns that counts are stale when the fetch failed, and stays silent when i
     "Fetch: git fetch --prune failed, so these counts come from local refs and may be stale.",
   )
   expect(line(facts(), "Fetch:")).toBeUndefined()
-})
-
-test("reports nothing outside a repository", () => {
-  expect(describe(facts({ repository: false }))).toBeUndefined()
 })

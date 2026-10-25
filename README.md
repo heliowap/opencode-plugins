@@ -13,11 +13,11 @@ asks a model to.
 The report is appended to the session's first prompt:
 
 ```
-Base check: branch dev at ae98936.
+Base check: branch dev at 7c597b5.
 Base: 1 commit behind origin/dev.
 Upstream: 1 commit behind origin/dev.
 Worktree: 2 uncommitted changes, so a rebase here would need a stash.
-No files were changed: this check only ran git fetch --prune and read-only git commands. Do not pull, rebase or merge unless the task asks for it.
+No files were changed: this check only ran git fetch --prune and read-only git commands. Do not pull, rebase or merge on your own initiative.
 ```
 
 - **Base** is how far behind your integration branch you are. This is the "stale base" the plugin
@@ -27,10 +27,12 @@ No files were changed: this check only ran git fetch --prune and read-only git c
 - **Worktree** counts `git status --porcelain` entries, because they decide whether a rebase is even
   possible without a stash.
 - A line starting with `Fetch:` appears only when `git fetch --prune` failed, and says that the
-  counts came from local refs and may be stale.
+  counts came from local refs and may be stale. The fetch is given ten seconds, because the first
+  prompt is waiting on it: a slow network degrades the report, not the session.
 
 A detached HEAD is reported as such and gets no upstream line. A directory that is not a repository
-gets no report at all.
+gets no report at all. The last line is a prohibition, not an invitation: it tells the model not to
+pull, rebase or merge on its own initiative, and it does not override a rebase you ask for yourself.
 
 ## Install
 
@@ -46,8 +48,15 @@ gets no report at all.
 The ref the session's base is compared against. Without it the plugin falls back to the remote's own
 default branch (`refs/remotes/origin/HEAD`), which is often **not** the branch you work from: a
 repository whose `origin/HEAD` points at `main` while everyone branches off `dev` needs
-`"base": "origin/dev"` to report anything useful. When no ref resolves at all, the report says so
-instead of guessing.
+`"base": "origin/dev"` to report anything useful. A fallback says so in the report, so a count
+against the wrong branch is never silent:
+
+```
+Base: 37 commits behind origin/main (the remote's default branch; set this plugin's "base" option to compare against another).
+```
+
+A configured ref the repository does not have is reported as such, and when nothing resolves at all
+the report asks for the option instead of guessing.
 
 ### Loading it from a local checkout
 
@@ -71,7 +80,9 @@ So the plugin uses both. `session.created` starts the check as a warm-up, which 
 session means the fetch runs while you are still typing. The `prompt` hook then waits for that
 result and appends it to the session's first prompt, starting the check itself if the warm-up did
 not arrive in time, as happens with one-shot `opencode run`. Subagent sessions are skipped: they
-inherit their parent's base. Later prompts in the same session are left alone.
+inherit their parent's base. Later prompts in the same session are left alone, for as long as the
+plugin runtime lives; after an OpenCode restart, a session you resume is checked once more, by then
+against a base that may well have moved.
 
 The report is **appended**, never prepended, because file and skill attachments carry `mention`
 offsets into the prompt text and prefixing would shift every one of them.
@@ -98,8 +109,10 @@ an explicit step you ask for.
 bun install
 bun test
 bun run typecheck
-script/e2e.sh   # needs a working provider; costs one model call per prompt
+bun script/e2e.ts   # needs a configured provider; costs one model call per prompt
 ```
 
 `src/facts.ts` and `src/describe.ts` are the tested seams. `src/index.ts` is the wiring that unit
-tests cannot see, and `script/e2e.sh` covers it against a real OpenCode session.
+tests cannot see, and `bun script/e2e.ts` covers it against a real OpenCode session: it serves a
+throwaway clone from a private `opencode serve`, sends two prompts, and exits non-zero unless the
+first carries the base check and the second does not.
