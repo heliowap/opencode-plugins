@@ -8,6 +8,9 @@ import { inspect } from "./facts.ts"
 // that in an interactive session the fetch runs while the user is still typing and the hook has
 // nothing left to wait for. The check itself only fetches and reads.
 const WARM_LIMIT = 64
+// The whole check, not one git command: past this the prompt goes through unannotated rather than
+// waiting on the sum of every step's own timeout.
+const DEADLINE = 15_000
 
 interface Owner {
   readonly parentID?: string
@@ -26,11 +29,14 @@ export default Plugin.define({
     // may well have moved.
     const annotated = new Set<string>()
 
-    // A failed check must never block the prompt it is attached to.
+    // A failed or slow check must never block the prompt it is attached to.
     const check = () =>
       inspect(ctx.location.directory, base)
         .then((facts) => (facts ? describe(facts) : undefined))
         .catch(() => undefined)
+
+    const within = (report: Promise<string | undefined>) =>
+      Promise.race([report, new Promise<undefined>((resolve) => setTimeout(resolve, DEADLINE).unref())])
 
     // Every location's instance receives every event, and subagents inherit their parent's base,
     // so only root sessions in this plugin's own location are checked.
@@ -49,18 +55,25 @@ export default Plugin.define({
 
     await ctx.session.hook("prompt", async (event) => {
       if (annotated.has(event.sessionID)) return
-      // Claimed before the first await, so two prompts admitted at once cannot both annotate.
+      // Claimed before the first await, so two prompts admitted at once cannot both annotate, and
+      // released below whenever no report was attached after all.
       annotated.add(event.sessionID)
 
       const warm = warmed.get(event.sessionID)
       warmed.delete(event.sessionID)
-      // No warm-up means the event lost the race with this prompt, as it does under `opencode run`,
-      // or the session predates this plugin runtime. Ownership still has to be established.
-      if (!warm && !owned(await ctx.session.get({ sessionID: event.sessionID }))) return
+      // A warm-up only exists for an owned session. Without one the event lost the race with this
+      // prompt, as it does under `opencode run`, or the session predates this plugin runtime, so
+      // ownership still has to be established.
+      const mine =
+        warm !== undefined || (await ctx.session.get({ sessionID: event.sessionID }).then(owned, () => false))
+      const report = mine ? await within(warm ?? check()) : undefined
+      if (!report) {
+        annotated.delete(event.sessionID)
+        return
+      }
 
-      const report = await (warm ?? check())
       // Appended, never prepended: attachment mentions carry offsets into this text.
-      if (report) event.prompt.text = `${event.prompt.text}\n\n${report}`
+      event.prompt.text = `${event.prompt.text}\n\n${report}`
     })
 
     return () => controller.abort()

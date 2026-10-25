@@ -19,10 +19,15 @@ const PORT = 4387
 const SERVER = `http://127.0.0.1:${PORT}`
 // `opencode serve` requires a password and takes it from the environment, which also authenticates
 // the clients below.
-const ENV = { ...process.env, OPENCODE_PASSWORD: "base-check-e2e" }
+const ENV = { ...process.env, OPENCODE_PASSWORD: crypto.randomUUID() }
 
 // PWD travels in the inherited environment and OpenCode reads it, so it has to agree with cwd.
 const at = (cwd: string) => ({ cwd, env: { ...ENV, PWD: cwd } })
+
+interface Message {
+  readonly text: string
+  readonly time: { readonly created: number }
+}
 
 const run = async (command: ReadonlyArray<string>, cwd: string) => {
   const spawned = Bun.spawn([...command], { ...at(cwd), stdout: "pipe", stderr: "pipe" })
@@ -105,10 +110,11 @@ try {
   const messages = JSON.parse(
     await run(["opencode", "api", "get", `/api/session/${session}/message`, "--server", SERVER], repo.directory),
   )
+  // Ordered by the recorded time rather than by the order the API happened to return.
   const prompts: ReadonlyArray<string> = messages.data
     .filter((message: { type: string }) => message.type === "user")
-    .reverse()
-    .map((message: { text: string }) => message.text)
+    .sort((one: Message, other: Message) => one.time.created - other.time.created)
+    .map((message: Message) => message.text)
 
   const [first, second] = prompts
   const failures = [

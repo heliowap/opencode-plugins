@@ -67,6 +67,17 @@ test("names the configured ref when it is the one that does not resolve", () => 
   )
 })
 
+test("does not blame the option when the ref exists but the count failed", () => {
+  expect(line(facts({ base: { state: "unreadable", ref: "origin/dev" } }), "Base:")).toBe(
+    "Base: the distance to origin/dev could not be counted.",
+  )
+})
+
+test("says a fact was unreadable instead of inventing one", () => {
+  expect(line(facts({ head: undefined }), "Base check:")).toBe("Base check: branch dev at an unknown commit.")
+  expect(line(facts({ dirty: undefined }), "Worktree:")).toBe("Worktree: could not be read.")
+})
+
 test("reports how the branch diverged from its upstream", () => {
   const upstream = (behind: number, ahead: number) =>
     line(facts({ upstream: { ref: "origin/dev", behind, ahead } }), "Upstream:")

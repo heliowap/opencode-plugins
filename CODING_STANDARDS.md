@@ -10,19 +10,25 @@
 - `src/describe.ts` owns every wording rule behind one pure function, `describe(facts)`. It does no
   I/O and always returns a report.
 - `src/index.ts` owns the wiring and the per-session bookkeeping that the wiring needs: which
-  sessions this location owns, which already carry a report, and which have a warm-up in flight.
-  Rules about git or about wording stay out of it.
+  sessions already carry a report, and which have a warm-up in flight. Ownership is decided per
+  event and per prompt, never recorded. Rules about git or about wording stay out of it.
+- A session is claimed before the first `await` so that two prompts admitted at once cannot both
+  annotate it, and the claim is released again whenever no report ends up attached. A session this
+  location does not own, or one whose check failed, must stay eligible.
 - `index.ts` at the root is the entry point. OpenCode resolves a local plugin directory from its
   root, so an `exports` entry pointing into `src/` is not loaded.
-- The plugin writes nothing. `git fetch --prune` is the only command that is not read-only; anything
-  that changes the working tree, the index or a ref stays out.
+- The plugin writes nothing. `git fetch --prune` is the only command that is not read-only, and
+  every call passes `--no-optional-locks`, without which `git status` rewrites `.git/index`.
+  Anything that changes the working tree, the index or a local ref stays out, and a test asserts
+  the index mtime is untouched.
 - The report is appended to the prompt, never prepended: attachment `mention` offsets index into
   that text.
 - The report never tells a model to mutate the repository. It states facts, and its last line
   forbids pulling, rebasing or merging on the model's own initiative. It does not override the
   user: a rebase the user asks for is still the user's call.
-- The session's first prompt waits on this check, so the git timeouts are short enough that a slow
-  network degrades the report rather than the session.
+- The session's first prompt waits on this check, so the whole check has a deadline in
+  `src/index.ts`, not just a timeout per git command: the steps run in sequence and their timeouts
+  would otherwise add up. Past the deadline the prompt goes through unannotated.
 
 ## Style
 

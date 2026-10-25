@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, expect, test } from "bun:test"
+import { stat, utimes } from "node:fs/promises"
+import { join } from "node:path"
 import { inspect } from "../src/facts.ts"
 import { workspace, type Workspace } from "./harness/repository.ts"
+
+const EPOCH = 1_577_847_600
 
 let repo: Workspace
 
@@ -104,11 +108,28 @@ test("reports a failed fetch but still counts against the local refs", async () 
   expect(facts?.base).toEqual({ state: "behind", ref: "origin/dev", behind: 0, defaulted: false })
 })
 
-test("reports a repository that has no commits yet", async () => {
+test("leaves the head absent in a repository that has no commits yet", async () => {
   const facts = await inspect(await repo.unborn())
 
-  expect(facts?.head).toBe("(no commits)")
+  expect(facts?.head).toBeUndefined()
   expect(facts?.base).toEqual({ state: "missing" })
+})
+
+test("separates a base ref that is absent from one that exists but cannot be counted", async () => {
+  // An orphan branch has no commit to count from, while origin/dev is still there.
+  await repo.git("checkout", "--orphan", "fresh")
+
+  expect((await inspect(repo.directory, "origin/dev"))?.base).toEqual({ state: "unreadable", ref: "origin/dev" })
+  expect((await inspect(repo.directory, "origin/nope"))?.base).toEqual({ state: "unresolved", ref: "origin/nope" })
+})
+
+test("reads the status without rewriting the index", async () => {
+  const index = join(repo.directory, ".git/index")
+  await utimes(index, EPOCH, EPOCH)
+
+  await inspect(repo.directory, "origin/dev")
+
+  expect((await stat(index)).mtimeMs).toBe(EPOCH * 1000)
 })
 
 test("reports nothing for a directory that is not a repository", async () => {

@@ -5,8 +5,9 @@ runs**, so no session starts blind on top of an outdated branch.
 
 It never changes your work. The only command it runs that is not read-only is
 `git fetch --prune`, which updates remote-tracking refs and touches neither the working tree, the
-index nor any local ref. It does not pull, rebase, merge, stash or check out anything, and it never
-asks a model to.
+index nor any local ref. Every git call passes `--no-optional-locks`, because without it
+`git status` rewrites `.git/index`. It does not pull, rebase, merge, stash or check out anything,
+and it never asks a model to.
 
 ## What a session sees
 
@@ -27,12 +28,19 @@ No files were changed: this check only ran git fetch --prune and read-only git c
 - **Worktree** counts `git status --porcelain` entries, because they decide whether a rebase is even
   possible without a stash.
 - A line starting with `Fetch:` appears only when `git fetch --prune` failed, and says that the
-  counts came from local refs and may be stale. The fetch is given ten seconds, because the first
-  prompt is waiting on it: a slow network degrades the report, not the session.
+  counts came from local refs and may be stale.
+
+The first prompt is waiting on this, so the whole check has a fifteen-second deadline, with ten of
+them for the fetch. Past the deadline the prompt goes through with no report rather than stalling,
+and a slow network degrades the report instead of the session.
 
 A detached HEAD is reported as such and gets no upstream line. A directory that is not a repository
-gets no report at all. The last line is a prohibition, not an invitation: it tells the model not to
-pull, rebase or merge on its own initiative, and it does not override a rebase you ask for yourself.
+gets no report at all. Anything git declined to answer is reported as unread rather than filled in
+with a plausible value: `Base check: branch dev at an unknown commit.`, `Worktree: could not be
+read.`, `Base: the distance to origin/dev could not be counted.`
+
+The last line is a prohibition, not an invitation: it tells the model not to pull, rebase or merge
+on its own initiative, and it does not override a rebase you ask for yourself.
 
 ## Install
 
@@ -63,7 +71,7 @@ the report asks for the option instead of guessing.
 Verified against opencode 2.1.4: a plugin directory is loaded only through a path **relative to the
 project**, resolved from the package root. An absolute path, a `file://` URL and a symlink are all
 ignored silently, and an `exports` entry pointing into a subdirectory (`"./src/index.ts"`) is not
-loaded either, which is why this package keeps `index.ts` at its root. `script/e2e.sh` copies the
+loaded either, which is why this package keeps `index.ts` at its root. `script/e2e.ts` copies the
 plugin into the throwaway project for this reason.
 
 ## Why it works this way

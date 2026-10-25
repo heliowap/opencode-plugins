@@ -8,9 +8,11 @@ export type Base =
       /** The ref came from the remote's default branch rather than from configuration. */
       readonly defaulted: boolean
     }
-  /** A configured ref that this repository does not have. */
+  /** A ref this repository does not have. */
   | { readonly state: "unresolved"; readonly ref: string }
-  /** Nothing configured, and the remote offers no default branch. */
+  /** The ref exists, but the distance to it could not be counted. */
+  | { readonly state: "unreadable"; readonly ref: string }
+  /** Nothing to compare against: nothing configured, and the remote offers no default branch. */
   | { readonly state: "missing" }
 
 export interface Upstream {
@@ -20,10 +22,12 @@ export interface Upstream {
 }
 
 export interface Facts {
-  readonly head: string
+  /** Absent when git did not report a commit, including a repository that has none yet. */
+  readonly head?: string
   /** Absent when HEAD is detached. */
   readonly branch?: string
-  readonly dirty: number
+  /** Absent when the working-copy status could not be read. */
+  readonly dirty?: number
   readonly fetch: "ok" | "failed"
   readonly base: Base
   /** Absent when HEAD is detached or the branch tracks nothing. */
@@ -34,40 +38,33 @@ export interface Facts {
 // instead of the session: a fetch that runs out of time is reported as a failed fetch.
 const FETCH_TIMEOUT = 10_000
 const READ_TIMEOUT = 5_000
-const UNBORN = "(no commits)"
 
 interface Result {
   readonly ok: boolean
   readonly out: string
 }
 
-// Expected failures are part of the diagnosis: a branch that tracks nothing, a repository with no
-// remote, a directory that is not a repository. They are returned, not thrown.
+// `--no-optional-locks` keeps this read-only: without it, `git status` rewrites `.git/index`.
+// Expected failures are part of the diagnosis: a branch that tracks nothing, a base ref the
+// repository does not have, a repository with no remote. They are returned, not thrown.
 const git = (directory: string, args: ReadonlyArray<string>, timeout = READ_TIMEOUT) =>
   new Promise<Result>((resolve) => {
-    execFile("git", [...args], { cwd: directory, timeout }, (error, stdout) =>
+    execFile("git", ["--no-optional-locks", ...args], { cwd: directory, timeout }, (error, stdout) =>
       resolve({ ok: !error, out: stdout.trim() }),
     )
   })
 
-const behind = async (directory: string, ref: string) => {
-  const result = await git(directory, ["rev-list", "--count", `HEAD..${ref}`])
-  return result.ok ? Number(result.out) : undefined
+const compare = async (directory: string, ref: string, defaulted: boolean): Promise<Base> => {
+  const exists = await git(directory, ["rev-parse", "--verify", "--quiet", ref])
+  if (!exists.ok) return { state: "unresolved", ref }
+  const count = await git(directory, ["rev-list", "--count", `HEAD..${ref}`])
+  return count.ok ? { state: "behind", ref, behind: Number(count.out), defaulted } : { state: "unreadable", ref }
 }
 
 const readBase = async (directory: string, configured: string | undefined): Promise<Base> => {
-  if (configured) {
-    const count = await behind(directory, configured)
-    return count === undefined
-      ? { state: "unresolved", ref: configured }
-      : { state: "behind", ref: configured, behind: count, defaulted: false }
-  }
+  if (configured) return compare(directory, configured, false)
   const fallback = await git(directory, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])
-  if (!fallback.ok) return { state: "missing" }
-  const count = await behind(directory, fallback.out)
-  return count === undefined
-    ? { state: "missing" }
-    : { state: "behind", ref: fallback.out, behind: count, defaulted: true }
+  return fallback.ok ? compare(directory, fallback.out, true) : { state: "missing" }
 }
 
 const readUpstream = async (directory: string, branch: string | undefined) => {
@@ -84,7 +81,7 @@ const readUpstream = async (directory: string, branch: string | undefined) => {
 /**
  * Reads how stale `directory` is, or returns `undefined` when it is not a git repository. Runs
  * `git fetch --prune` and read-only git commands; it never changes the working tree, the index or
- * any ref.
+ * any local ref. A fact git did not report is left absent rather than filled in.
  */
 export const inspect = async (directory: string, configuredBase?: string): Promise<Facts | undefined> => {
   const repository = await git(directory, ["rev-parse", "--git-dir"])
@@ -96,11 +93,11 @@ export const inspect = async (directory: string, configuredBase?: string): Promi
   const status = await git(directory, ["status", "--porcelain"])
 
   return {
-    head: head.ok ? head.out : UNBORN,
+    ...(head.ok ? { head: head.out } : {}),
     ...(branch.ok ? { branch: branch.out } : {}),
-    dirty: status.out === "" ? 0 : status.out.split("\n").length,
+    ...(status.ok ? { dirty: status.out === "" ? 0 : status.out.split("\n").length } : {}),
     fetch: fetch.ok ? "ok" : "failed",
-    base: head.ok ? await readBase(directory, configuredBase) : { state: "missing" },
+    base: await readBase(directory, configuredBase),
     ...(await readUpstream(directory, branch.ok ? branch.out : undefined)),
   }
 }
