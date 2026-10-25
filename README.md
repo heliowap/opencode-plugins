@@ -68,11 +68,20 @@ the report asks for the option instead of guessing.
 
 ### Loading it from a local checkout
 
-Verified against opencode 2.1.4: a plugin directory is loaded only through a path **relative to the
-project**, resolved from the package root. An absolute path, a `file://` URL and a symlink are all
-ignored silently, and an `exports` entry pointing into a subdirectory (`"./src/index.ts"`) is not
-loaded either, which is why this package keeps `index.ts` at its root. `script/e2e.ts` copies the
-plugin into the throwaway project for this reason.
+```jsonc
+{
+  "plugins": [{ "package": "/absolute/path/to/opencode-v2-base-check", "options": { "base": "origin/dev" } }]
+}
+```
+
+Relative paths, absolute paths, `file://` URLs and symlinks all work, verified on opencode 2.1.4.
+What matters is where the directory's entry lives: OpenCode resolves a local plugin directory as a
+path, trying `<dir>/server` and then `<dir>/index`, and never reads that directory's `package.json`
+(`packages/plugin/src/host.ts`). A directory whose entry is declared only through `exports` or
+`main`, pointing into `src/`, therefore loads nothing and logs nothing at all — upstream
+[#52300](https://github.com/anomalyco/opencode/issues/52300). That is why this package keeps
+`index.ts` at its root, re-exporting `src/index.ts`. An installed package does resolve `exports`, so
+the `github:` form above was never affected.
 
 ## Why it works this way
 

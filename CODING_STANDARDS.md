@@ -15,8 +15,10 @@
 - A session is claimed before the first `await` so that two prompts admitted at once cannot both
   annotate it, and the claim is released again whenever no report ends up attached. A session this
   location does not own, or one whose check failed, must stay eligible.
-- `index.ts` at the root is the entry point. OpenCode resolves a local plugin directory from its
-  root, so an `exports` entry pointing into `src/` is not loaded.
+- `index.ts` at the root is the entry point, and it only re-exports `src/index.ts`. OpenCode
+  resolves a local plugin directory as a path (`<dir>/server`, then `<dir>/index`) and never reads
+  that directory's `package.json`, so declaring the entry only through `exports` or `main` loads
+  nothing and logs nothing. Do not move it under `src/`.
 - The plugin writes nothing. `git fetch --prune` is the only command that is not read-only, and
   every call passes `--no-optional-locks`, without which `git status` rewrites `.git/index`.
   Anything that changes the working tree, the index or a local ref stays out, and a test asserts
@@ -53,8 +55,9 @@
 ## End-to-end check
 
 Unit tests cannot see the plugin wiring. After changing `src/index.ts`, run `bun script/e2e.ts`. It
-builds the same fixture as the tests through `test/harness/repository.ts`, serves it from a private
-`opencode serve` so the user's own service and data are untouched, sends two prompts and checks that
+builds the same fixture as the tests through `test/harness/repository.ts`, loads this checkout by
+absolute path, serves it from a private `opencode serve` so the user's own service and data are
+untouched, sends two prompts and checks that
 
 1. the first user message OpenCode persisted carries `Base: 1 commit behind origin/dev.`, while the
    clone's own refs still report `0`, and

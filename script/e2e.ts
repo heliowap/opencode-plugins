@@ -8,7 +8,6 @@
  *
  * Usage: bun script/e2e.ts [model]
  */
-import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { workspace } from "../test/harness/repository.ts"
 
@@ -82,19 +81,14 @@ try {
   await repo.push("published.txt")
   const local = await repo.git("rev-list", "--count", "HEAD..origin/dev")
 
-  // OpenCode loads a local plugin only from a directory inside the project, resolved from the
-  // package root; absolute paths, file:// URLs and symlinks are ignored (opencode 2.1.4).
-  await mkdir(join(repo.directory, "basecheck"))
-  await run(
-    ["cp", "-R", join(PLUGIN, "src"), join(PLUGIN, "index.ts"), join(PLUGIN, "package.json"), "basecheck"],
-    repo.directory,
-  )
+  // This checkout is loaded where it is, by absolute path: OpenCode resolves a local plugin
+  // directory from its root, which is what index.ts at the root of this package is for.
   await Bun.write(
     join(repo.directory, "opencode.jsonc"),
     `${JSON.stringify(
       {
         $schema: "https://opencode.ai/config.json",
-        plugins: [{ package: "./basecheck", options: { base: "origin/dev" } }],
+        plugins: [{ package: PLUGIN, options: { base: "origin/dev" } }],
       },
       null,
       2,
