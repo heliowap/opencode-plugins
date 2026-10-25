@@ -1,0 +1,22 @@
+{
+  "name": "opencode-v2-base-check",
+  "version": "0.1.0",
+  "description": "Tells an OpenCode session how stale its git base is, before the first prompt runs, without touching the working tree",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.0.24"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@typescript/native-preview": "^7.0.0-dev"
+  },
+  "license": "MIT"
+}
