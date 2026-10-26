@@ -91,14 +91,12 @@ export class Host {
           ...options.providers,
         },
         ...(options.pluginSpec && { plugins: [options.pluginSpec] }),
-        ...(options.pluginOptions && { plugins: [{ package: `file://${join(REPO, "src")}`, options: options.pluginOptions }] }),
+        ...(!options.pluginSpec && {
+          plugins: [{ package: `file://${join(REPO, "src")}`, options: { continuationDelayMs: 0, ...options.pluginOptions } }],
+        }),
         ...(options.allowAll && { permissions: [{ action: "*", resource: "*", effect: "allow" }] }),
       }),
     )
-    if (!options.pluginSpec && !options.pluginOptions) {
-      await mkdir(join(config, "plugins"), { recursive: true })
-      await symlink(join(REPO, "src"), join(config, "plugins", "goal"))
-    }
     if (options.noHostRetry) {
       await mkdir(join(config, "plugins"), { recursive: true })
       await symlink(join(REPO, "host", "harness", "no-host-retry"), join(config, "plugins", "no-host-retry"))

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { decodeGoal, isUnfinished, retryDelays, step, type Goal } from "../src/goal.ts"
+import { continuationDelay, decodeGoal, isUnfinished, retryDelays, step, type Goal } from "../src/goal.ts"
 
 const T0 = 1_000
 const T1 = 2_000
@@ -16,7 +16,7 @@ const active = (patch: Partial<Goal> = {}): Goal => ({
   ...patch,
 })
 
-const turn = (activity: boolean, planning = false) => ({ _tag: "TurnEnded", activity, planning }) as const
+const turn = (activity: boolean, planning = false) => ({ _tag: "TurnEnded", activity, planning, delayMs: 120_000 }) as const
 
 describe("set and edit", () => {
   test("Set creates an active goal and starts it", () => {
@@ -83,23 +83,65 @@ describe("set and edit", () => {
 })
 
 describe("continuation", () => {
-  test("a turn with activity continues and resets the empty streak", () => {
+  test("the default cooldown is two minutes, and a configured wait is honored", () => {
+    expect(step(active(), { _tag: "TurnEnded", activity: true, planning: false }, T1)).toEqual({
+      goal: active({ continueAt: 122_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 122_000 },
+    })
+    expect(step(active(), { ...turn(true), delayMs: 500 }, T1)).toEqual({
+      goal: active({ continueAt: 2_500, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 2_500 },
+    })
+  })
+
+  test("a matching cooldown continues once, only when due", () => {
+    const goal = active({ continueAt: 122_000 })
+    expect(step(goal, { _tag: "ContinueDue", at: 122_000 }, 121_999)).toEqual({ goal, effect: { _tag: "Cooldown", at: 122_000 } })
+    const due = step(goal, { _tag: "ContinueDue", at: 122_000 }, 122_000)
+    expect(due).toEqual({ goal: active({ updatedAt: 122_000 }), effect: { _tag: "Continue" } })
+    expect(step(due.goal, { _tag: "ContinueDue", at: 122_000 }, 122_001)).toEqual({ goal: due.goal, effect: { _tag: "None" } })
+    expect(step(goal, { _tag: "ContinueDue", at: 122_000 }, 122_001).effect).toEqual({ _tag: "Continue" })
+  })
+
+  test.each(["paused", "blocked", "complete", "budget_limited"] as const)("a cooldown cannot resume a %s goal", (status) => {
+    const goal = active({ status, continueAt: 122_000 })
+    expect(step(goal, { _tag: "ContinueDue", at: 122_000 }, 122_000)).toEqual({ goal, effect: { _tag: "None" } })
+  })
+
+  test("a new turn invalidates the old cooldown without resetting the empty streak", () => {
+    const goal = active({ continueAt: 122_000, emptyTurns: 2 })
+    const started = step(goal, { _tag: "TurnStarted" }, T1)
+    expect(started).toEqual({ goal: active({ emptyTurns: 2, updatedAt: T1 }), effect: { _tag: "None" } })
+    expect(step(started.goal, { _tag: "ContinueDue", at: 122_000 }, 122_000)).toEqual({ goal: started.goal, effect: { _tag: "None" } })
+    expect(step(active(), { _tag: "TurnStarted" }, T1)).toEqual({ goal: active(), effect: { _tag: "None" } })
+    const later = active({ continueAt: 123_000 })
+    expect(step(later, { _tag: "ContinueDue", at: 122_000 }, 123_000)).toEqual({ goal: later, effect: { _tag: "None" } })
+  })
+
+  test.each([{ _tag: "Resume" }, { _tag: "Edit", objective: "narrower" }] as const)("%p invalidates an old cooldown", (event) => {
+    const goal = active({ continueAt: 122_000, ...(event._tag === "Resume" && { status: "paused" }) })
+    const next = step(goal, event, T1)
+    expect(next.goal?.continueAt).toBeUndefined()
+    expect(step(next.goal, { _tag: "ContinueDue", at: 122_000 }, 122_000).effect).toEqual({ _tag: "None" })
+  })
+
+  test("a turn with activity waits before continuing and resets the empty streak", () => {
     expect(step(active({ emptyTurns: 2 }), turn(true), T1)).toEqual({
-      goal: active({ updatedAt: T1 }),
-      effect: { _tag: "Continue" },
+      goal: active({ continueAt: 122_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 122_000 },
     })
   })
 
   test("an empty turn still continues while under the limit", () => {
     expect(step(active({ emptyTurns: 1 }), turn(false), T1)).toEqual({
-      goal: active({ emptyTurns: 2, updatedAt: T1 }),
-      effect: { _tag: "Continue" },
+      goal: active({ emptyTurns: 2, continueAt: 122_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 122_000 },
     })
   })
 
   test("the third empty turn in a row blocks the goal", () => {
     expect(step(active({ emptyTurns: 2 }), turn(false), T1)).toEqual({
-      goal: active({ emptyTurns: 3, status: "blocked", note: "3 consecutive turns produced no output.", updatedAt: T1 }),
+      goal: active({ emptyTurns: 3, status: "blocked", note: "3 consecutive turns produced no visible text or file edits. Run /goal resume to continue.", updatedAt: T1 }),
       effect: { _tag: "None" },
     })
   })
@@ -456,10 +498,10 @@ describe("interruptions and failures", () => {
 
   test("a turn that ends clears the failure streak", () => {
     expect(step(active({ failedTurns: 2 }), turn(true), T1)).toEqual({
-      goal: active({ updatedAt: T1 }),
-      effect: { _tag: "Continue" },
+      goal: active({ continueAt: 122_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 122_000 },
     })
-    expect(step(active({ failedTurns: 2 }), turn(false), T1).goal).toEqual(active({ emptyTurns: 1, updatedAt: T1 }))
+    expect(step(active({ failedTurns: 2 }), turn(false), T1).goal).toEqual(active({ emptyTurns: 1, continueAt: 122_000, updatedAt: T1 }))
   })
 
   test("resume clears the failure streak", () => {
@@ -676,5 +718,19 @@ describe("retryDelays", () => {
     ["not a list", "1,2,3", [30_000, 120_000, 300_000]],
   ] as const)("%s", (_name, option, expected) => {
     expect(retryDelays(option)).toEqual([...expected])
+  })
+})
+
+describe("continuationDelay", () => {
+  test.each([
+    [undefined, 120_000],
+    [500, 500],
+    [0, 0],
+    [-1, 120_000],
+    ["500", 120_000],
+    [NaN, 120_000],
+    [Infinity, 120_000],
+  ])("%p -> %p milliseconds", (option, expected) => {
+    expect(continuationDelay(option)).toEqual(expected)
   })
 })

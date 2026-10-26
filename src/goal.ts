@@ -15,6 +15,7 @@ export const Goal = Schema.Struct({
   verifyFailures: Schema.optional(Schema.Int),
   lastExitCode: Schema.optional(Schema.Int),
   failedTurns: Schema.optional(Schema.Int),
+  continueAt: Schema.optional(Schema.Finite),
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
 })
@@ -32,6 +33,9 @@ export const retryDelays = (option: unknown): readonly number[] =>
   Array.isArray(option) && option.length === RETRY_LIMIT && option.every((ms) => typeof ms === "number" && ms >= 0)
     ? option
     : RETRY_DELAYS_MS
+
+export const continuationDelay = (option: unknown): number =>
+  typeof option === "number" && option >= 0 && option < Infinity ? option : 120_000
 
 // OpenCode reports HTTP statuses up to 599.
 const serverError = (status: number | undefined) => (status ?? 0) >= 500
@@ -63,7 +67,9 @@ export type GoalEvent =
   | { readonly _tag: "Block"; readonly note: string | undefined }
   | { readonly _tag: "PauseRequested"; readonly note: string | undefined }
   | { readonly _tag: "Usage"; readonly tokens: number; readonly closing: boolean }
-  | { readonly _tag: "TurnEnded"; readonly activity: boolean; readonly planning: boolean }
+  | { readonly _tag: "TurnStarted" }
+  | { readonly _tag: "TurnEnded"; readonly activity: boolean; readonly planning: boolean; readonly delayMs?: number }
+  | { readonly _tag: "ContinueDue"; readonly at: number }
   | { readonly _tag: "Interrupted"; readonly reason: "user" | "shutdown" | "superseded" | "inactivity" }
   | { readonly _tag: "Failed"; readonly message: string; readonly status?: number }
   | { readonly _tag: "RetryDue"; readonly attempt: number }
@@ -83,6 +89,7 @@ export type GoalEffect =
   | { readonly _tag: "Refuse"; readonly text: string }
   | { readonly _tag: "OpenEditor"; readonly objective: string }
   | { readonly _tag: "Retry"; readonly attempt: number }
+  | { readonly _tag: "Cooldown"; readonly at: number }
 
 interface Step {
   readonly goal: Goal | undefined
@@ -92,7 +99,7 @@ interface Step {
 const none: GoalEffect = { _tag: "None" }
 const notify = (text: string): GoalEffect => ({ _tag: "Notify", text })
 const refuse = (text: string): GoalEffect => ({ _tag: "Refuse", text })
-const RESET_STREAK = { failedTurns: undefined }
+const RESET_STREAK = { failedTurns: undefined, continueAt: undefined }
 const REACTIVATED = { status: "active", note: undefined, emptyTurns: 0, ...RESET_STREAK } as const
 const BUDGET_REACHED = { status: "budget_limited", note: "Token budget reached." } as const
 
@@ -245,12 +252,28 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
     }
     case "RetryDue":
       return goal.status === "active" && goal.failedTurns === event.attempt ? { goal, effect: { _tag: "Continue" } } : unchanged
+    case "TurnStarted":
+      return goal.continueAt === undefined ? unchanged : update({ continueAt: undefined })
+    case "ContinueDue":
+      if (goal.status !== "active" || goal.continueAt !== event.at) return unchanged
+      return now >= event.at
+        ? update({ continueAt: undefined }, { _tag: "Continue" })
+        : { goal, effect: { _tag: "Cooldown", at: event.at } }
     case "TurnEnded": {
       if (goal.status !== "active" || event.planning) return unchanged
       const emptyTurns = event.activity ? 0 : goal.emptyTurns + 1
+      const at = now + continuationDelay(event.delayMs)
       return emptyTurns >= EMPTY_TURN_LIMIT
-        ? update({ emptyTurns, ...RESET_STREAK, status: "blocked", note: `${EMPTY_TURN_LIMIT} consecutive turns produced no output.` })
-        : update({ emptyTurns, ...RESET_STREAK }, { _tag: "Continue" })
+        ? update({
+            emptyTurns,
+            ...RESET_STREAK,
+            status: "blocked",
+            note: `${EMPTY_TURN_LIMIT} consecutive turns produced no visible text or file edits. Run /goal resume to continue.`,
+          })
+        : update(
+            { emptyTurns, ...RESET_STREAK, continueAt: at },
+            { _tag: "Cooldown", at },
+          )
     }
   }
 }

@@ -5,7 +5,10 @@ import { spawn } from "node:child_process"
 import { homedir } from "node:os"
 import { parseCommand, type GoalCommand } from "./command.ts"
 import { formatTokens } from "./format.ts"
-import { decodeGoal, isUnfinished, retryDelays, step, type Check, type Goal, type GoalEffect, type GoalEvent } from "./goal.ts"
+import {
+  continuationDelay, decodeGoal, isUnfinished, retryDelays, step,
+  type Check, type Goal, type GoalEffect, type GoalEvent,
+} from "./goal.ts"
 import {
   budgetLimitPrompt,
   COMMAND_HELP,
@@ -55,6 +58,7 @@ const updateInput = toolInput(UpdateInput)
 const getInput = toolInput(Schema.Struct({}))
 
 const PLANNING_AGENTS = new Set(["plan"])
+const MUTATING_TOOLS = new Set(["write", "edit", "patch", "apply_patch"])
 
 const KEY_PREFIX = "goal/"
 
@@ -66,6 +70,7 @@ interface LocationState {
   readonly resumePending: Set<string>
   readonly closingSteps: Map<string, string>
   readonly retries: Map<string, { readonly attempt: number; readonly at: number }>
+  readonly continuations: Map<string, number>
 }
 
 const LOCATIONS: Map<string, LocationState> = ((globalThis as Record<symbol, Map<string, LocationState> | undefined>)[
@@ -74,8 +79,19 @@ const LOCATIONS: Map<string, LocationState> = ((globalThis as Record<symbol, Map
 
 const locationState = (directory: string) => {
   const existing = LOCATIONS.get(directory)
-  if (existing) return { state: existing, fresh: false }
-  const state: LocationState = { activity: new Set(), agents: new Map(), resumePending: new Set(), closingSteps: new Map(), retries: new Map() }
+  if (existing) {
+    // A running server may still hold bookkeeping created before cooldowns were added.
+    if (!existing.continuations) Object.assign(existing, { continuations: new Map() })
+    return { state: existing, fresh: false }
+  }
+  const state: LocationState = {
+    activity: new Set(),
+    agents: new Map(),
+    resumePending: new Set(),
+    closingSteps: new Map(),
+    retries: new Map(),
+    continuations: new Map(),
+  }
   LOCATIONS.set(directory, state)
   return { state, fresh: true }
 }
@@ -120,6 +136,7 @@ export default Plugin.define({
       const scope = yield* Effect.scope
       const now = () => Date.now()
       const delays = retryDelays(ctx.options.retryDelaysMs)
+      const cooldownMs = continuationDelay(ctx.options.continuationDelayMs)
       const tracing = logEnabled(ctx.options, process.env)
       const traceFile = logPath(process.env, homedir())
 
@@ -148,7 +165,7 @@ export default Plugin.define({
       const goalOutput = ({ goal }: { readonly goal: Goal | undefined }) => ({ goal: goal ?? null })
 
       const { state, fresh } = locationState(ctx.location.directory)
-      const { activity, agents, resumePending, closingSteps, retries } = state
+      const { activity, agents, resumePending, closingSteps, retries, continuations } = state
       const key = (sessionID: string) => `${KEY_PREFIX}${sessionID}`
       const planning = (sessionID: string) => PLANNING_AGENTS.has(agents.get(sessionID) ?? "")
 
@@ -206,6 +223,20 @@ export default Plugin.define({
           Effect.asVoid,
         )
 
+      const scheduleContinuation = (sessionID: string, at: number) =>
+        Effect.sync(() => continuations.set(sessionID, at)).pipe(
+          Effect.andThen(
+            Effect.forkIn(
+              Effect.sleep(Math.max(0, Math.min(60_000, at - now()))).pipe(
+                Effect.andThen(onEvent(sessionID, { _tag: "ContinueDue", at })),
+                Effect.catchCause(logFailure("continuation", sessionID)),
+              ),
+              scope,
+            ),
+          ),
+          Effect.asVoid,
+        )
+
       const perform = (sessionID: string, goal: Goal | undefined, effect: GoalEffect) => {
         switch (effect._tag) {
           case "None":
@@ -225,6 +256,8 @@ export default Plugin.define({
             return goal ? steer(sessionID, objectiveUpdatedPrompt(goal, now())) : Effect.void
           case "Retry":
             return scheduleRetry(sessionID, effect.attempt, now() + delays[effect.attempt - 1]!)
+          case "Cooldown":
+            return scheduleContinuation(sessionID, effect.at)
         }
       }
 
@@ -238,6 +271,7 @@ export default Plugin.define({
           Effect.gen(function* () {
             const before = yield* load(sessionID)
             const next = step(before, event, now())
+            if (next.goal?.status !== "active" || next.goal.continueAt === undefined) continuations.delete(sessionID)
             yield* trace(transitionRecord(sessionID, event, before, next.goal, next.effect, now()))
             if (next.goal !== before) {
               yield* save(sessionID, next.goal)
@@ -364,7 +398,11 @@ export default Plugin.define({
         })
       })
 
-      yield* ctx.tool.hook("execute.after", (event) => Effect.sync(() => activity.add(event.sessionID)))
+      yield* ctx.tool.hook("execute.after", (event) =>
+        Effect.sync(() => {
+          if (event.status === "completed" && MUTATING_TOOLS.has(event.tool)) activity.add(event.sessionID)
+        }),
+      )
 
       yield* ctx.session.hook("context", (event) =>
         Effect.gen(function* () {
@@ -380,7 +418,7 @@ export default Plugin.define({
             return Effect.sync(() => {
               activity.delete(event.data.sessionID)
               resumePending.delete(event.data.sessionID)
-            })
+            }).pipe(Effect.andThen(onEvent(event.data.sessionID, { _tag: "TurnStarted" })))
           case "session.text.ended":
             return Effect.sync(() => {
               if (event.data.text.trim()) activity.add(event.data.sessionID)
@@ -397,6 +435,7 @@ export default Plugin.define({
               _tag: "TurnEnded",
               activity: activity.has(event.data.sessionID),
               planning: planning(event.data.sessionID),
+              delayMs: cooldownMs,
             })
           case "session.execution.interrupted":
             return onEvent(event.data.sessionID, { _tag: "Interrupted", reason: event.data.reason })
@@ -430,10 +469,16 @@ export default Plugin.define({
           } while (after)
         })
 
-      // A reload closes the previous scope and with it any pending retry wait.
+      // A reload closes the previous scope and its pending retry and continuation waits.
       const startup = fresh
         ? forActiveGoals((sessionID) => transition(sessionID, { _tag: "Recovered" }, { quiet: true }))
-        : Effect.forEach([...retries], ([sessionID, { attempt, at }]) => scheduleRetry(sessionID, attempt, at), { discard: true })
+        : Effect.all(
+            [
+              Effect.forEach([...retries], ([sessionID, { attempt, at }]) => scheduleRetry(sessionID, attempt, at), { discard: true }),
+              Effect.forEach([...continuations], ([sessionID, at]) => scheduleContinuation(sessionID, at), { discard: true }),
+            ],
+            { discard: true },
+          )
       yield* startup.pipe(Effect.catchCause(logFailure("recovery")))
 
       yield* ctx.event.subscribe().pipe(
