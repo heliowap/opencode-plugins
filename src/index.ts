@@ -1,7 +1,7 @@
 import { Plugin } from "@opencode/plugin"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import { classify } from "./failure.ts"
-import { resolve, routeKey, type CatalogModel, type Route, type Skip } from "./policy.ts"
+import { isPolicied, resolve, routeKey, type CatalogModel, type Route, type Skip } from "./policy.ts"
 import { exhaustedRoutes } from "./quota.ts"
 import { quotaSettings, quotaSource } from "./quota-source.ts"
 
@@ -32,6 +32,8 @@ export default Plugin.define({
     const unhealthyUntil = new Map<string, number>()
     const decisions = new Map<string, Decision>()
     const quota = quotaSource(quotaSettings(process.env))
+    // Routes exhausted by the last quota read. Retry and dispatch both use this set, so they agree on the route set.
+    let exhausted: ReadonlySet<string> = new Set()
 
     const catalog = async (): Promise<CatalogModel[]> =>
       (await ctx.model.list()).data.map((model) => ({
@@ -48,8 +50,8 @@ export default Plugin.define({
     let known = await catalog()
 
     await ctx.session.hook("retry", (event) => {
-      const resolution = resolve(event.agent, known, unhealthy())
-      if (resolution.kind === "unenforced") return
+      if (!isPolicied(event.agent)) return
+      const resolution = resolve(event.agent, known, { unhealthy: unhealthy(), exhausted })
       const failed = routeKey({ providerID: event.model.providerID, model: event.model.id })
       if (!resolution.routes.some((route) => routeKey(route) === failed)) return
       const classification = classify(event.error)
@@ -64,11 +66,10 @@ export default Plugin.define({
       const input = event.input
       known = await catalog()
       // Unpolicied agents keep their own model, so they never wait on a quota read.
-      if (resolve(input.agent, known).kind === "unenforced") return
-      const exhausted = exhaustedRoutes(known, await quota.claude())
+      if (!isPolicied(input.agent)) return
+      exhausted = exhaustedRoutes(known, await quota.claude())
       const failing = unhealthy()
-      const resolution = resolve(input.agent, known, failing, exhausted)
-      if (resolution.kind === "unenforced") return
+      const resolution = resolve(input.agent, known, { unhealthy: failing, exhausted })
       const route = resolution.routes[0]
       if (!route) throw new ToolError({ message: `Model policy for ${input.agent}: no allowed route is available.` })
       decisions.set(event.id, {

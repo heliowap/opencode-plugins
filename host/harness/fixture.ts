@@ -1,3 +1,5 @@
+import { Host, type HostOptions } from "./host.ts"
+
 export interface ChatMessage {
   readonly role: string
   readonly content?: unknown
@@ -130,3 +132,37 @@ export const startFixture = (script: Script): Fixture => {
   }
   return fixture
 }
+
+/**
+ * The parent turn that dispatches one subagent with `args`, then ends once its result comes back.
+ * Child calls get `child`'s reply.
+ */
+export const dispatch =
+  (args: Record<string, unknown>, child: (call: Call) => Reply = () => ({ text: "child answer" })) =>
+  (call: Call): Reply => {
+    if (call.provider !== "fixture") return child(call)
+    if (toolResults(call.request).length) return { text: "parent done" }
+    return { tool: "subagent", args: { description: "look it up", prompt: "find the fact", ...args } }
+  }
+
+const started: Host[] = []
+
+// Starts a host, prompts one delegation, and waits for the session to settle. stopRuns() stops these hosts.
+export const run = async (options: HostOptions) => {
+  const host = await Host.start(options)
+  started.push(host)
+  const session = await host.session()
+  await host.prompt(session, "delegate")
+  await host.settle(session)
+  return { host, session }
+}
+
+export const stopRuns = () => Promise.all(started.splice(0).map((host) => host.stop()))
+
+export type ToolPart = { type: "tool"; name: string; state: { status: string; metadata: Record<string, unknown> } }
+
+// The subagent tool parts of a session, in message order.
+export const toolParts = async (host: Host, session: { id: string }) =>
+  (await host.messages(session))
+    .flatMap((message) => (Array.isArray(message.content) ? (message.content as ToolPart[]) : []))
+    .filter((part) => part.type === "tool" && part.name === "subagent")

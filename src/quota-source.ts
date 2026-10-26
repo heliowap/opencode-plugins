@@ -1,4 +1,4 @@
-import { claudeQuota, type ClaudeQuota } from "./quota.ts"
+import { claudeQuota, UNKNOWN, type ClaudeQuota } from "./quota.ts"
 
 export interface QuotaSettings {
   readonly baseURL: string
@@ -16,13 +16,11 @@ export interface QuotaSource {
   readonly claude: () => Promise<ClaudeQuota>
 }
 
-const UNKNOWN: ClaudeQuota = { _tag: "Unknown" }
-
 // Rejected or rate-limited management calls are not retried until the backoff passes.
 const BLOCKING_STATUSES = new Set([401, 403, 429])
 
 export const quotaSettings = (env: Readonly<Record<string, string | undefined>>): QuotaSettings => ({
-  baseURL: (env.CLIPROXY_URL ?? "http://127.0.0.1:8317").replace(/\/+$/, ""),
+  baseURL: (env.CLIPROXY_URL || "http://127.0.0.1:8317").replace(/\/+$/, ""),
   managementKey: env.CLIPROXY_MANAGEMENT_KEY ?? "",
 })
 

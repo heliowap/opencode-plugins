@@ -49,6 +49,13 @@ describe("quota settings", () => {
     expect(quotaSettings({})).toEqual({ baseURL: "http://127.0.0.1:8317", managementKey: "" })
   })
 
+  test("an empty CLIPROXY_URL falls back to the default proxy", () => {
+    expect(quotaSettings({ CLIPROXY_URL: "", CLIPROXY_MANAGEMENT_KEY: "k" })).toEqual({
+      baseURL: "http://127.0.0.1:8317",
+      managementKey: "k",
+    })
+  })
+
   test("come from the proxy environment, without trailing slashes", () => {
     expect(quotaSettings({ CLIPROXY_URL: "http://proxy.example:9000///", CLIPROXY_MANAGEMENT_KEY: "k" })).toEqual({
       baseURL: "http://proxy.example:9000",

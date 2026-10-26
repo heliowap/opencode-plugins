@@ -1,12 +1,12 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { childRoutes, HAIKU, OPUS, SOL, SONNET, toolResults, type Call, type Reply } from "./harness/fixture.ts"
+import { FLOOR_PERCENT } from "../src/quota.ts"
+import { childRoutes, dispatch, HAIKU, OPUS, routeOf, run, SOL, SONNET, stopRuns, toolParts } from "./harness/fixture.ts"
 import { Host } from "./harness/host.ts"
 
 const TIMEOUT = 120_000
 const KEY = "stub-key"
-const SKIP_REASON = "account quota below 5%"
+const SKIP_REASON = `account quota below ${FLOOR_PERCENT}%`
 
-let host: Host | undefined
 let respond: () => Response = () => Response.json(credentials("0.2"))
 let requests: { path: string; key: string | null }[] = []
 
@@ -26,10 +26,7 @@ beforeEach(() => {
   respond = () => Response.json(credentials("0.2"))
 })
 
-afterEach(async () => {
-  await host?.stop()
-  host = undefined
-})
+afterEach(() => stopRuns())
 
 afterAll(() => stub.stop(true))
 
@@ -56,35 +53,17 @@ function credentials(utilization: string) {
 
 const quotaEnv = () => ({ CLIPROXY_URL: `http://127.0.0.1:${stub.port}`, CLIPROXY_MANAGEMENT_KEY: KEY })
 
-// The parent dispatches one subagent with `args`, then ends its turn once the result comes back.
-const dispatch = (args: Record<string, unknown>) => (call: Call): Reply => {
-  if (call.provider !== "fixture") return { text: "child answer" }
-  if (toolResults(call.request).length) return { text: "parent done" }
-  return { tool: "subagent", args: { description: "look it up", prompt: "find the fact", ...args } }
-}
-
-type ToolPart = { type: "tool"; name: string; state: { status: string; metadata: Record<string, unknown> } }
-
-const run = async (args: Record<string, unknown>) => {
-  host = await Host.start({ script: dispatch(args), env: quotaEnv() })
-  const session = await host.session()
-  await host.prompt(session, "delegate")
-  await host.settle(session)
-  return { host, session }
-}
+const runWithQuota = (args: Record<string, unknown>) => run({ script: dispatch(args), env: quotaEnv() })
 
 const modelPolicyTrails = async (host: Host, session: { id: string }) =>
-  (await host.messages(session))
-    .flatMap((message) => (Array.isArray(message.content) ? (message.content as ToolPart[]) : []))
-    .filter((part) => part.type === "tool" && part.name === "subagent")
-    .map((part) => part.state.metadata.modelPolicy)
+  (await toolParts(host, session)).map((part) => part.state.metadata.modelPolicy)
 
 describe("implementer dispatch with Claude quota exhausted", () => {
   test(
-    "an implementer skips the exhausted Claude routes and runs on Sol 5.5 at medium effort",
+    "an implementer skips the exhausted Claude routes and runs on GPT-6.1 Sol at medium effort",
     async () => {
       respond = () => Response.json(credentials("0.99"))
-      const { host: running, session } = await run({ agent: "implementer" })
+      const { host: running, session } = await runWithQuota({ agent: "implementer" })
 
       expect(childRoutes(running.fixture.agentCalls())).toEqual([`${SOL}#medium`])
       const [trail] = await modelPolicyTrails(running, session)
@@ -102,12 +81,30 @@ describe("implementer dispatch with Claude quota exhausted", () => {
   )
 })
 
+describe("retry with Claude quota exhausted", () => {
+  test(
+    "a rate-limited GPT-6.1 Sol route with no Claude fallback is retried on Sol, not failed back to the parent",
+    async () => {
+      respond = () => Response.json(credentials("0.99"))
+      let solCalls = 0
+      const script = dispatch({ agent: "implementer" }, (call) =>
+        routeOf(call) === SOL && solCalls++ === 0 ? { status: 429, error: "rate limited" } : { text: "child answer" },
+      )
+      const { host: running, session } = await run({ script, env: quotaEnv() })
+
+      expect((await toolParts(running, session)).map((part) => part.state.status)).toEqual(["completed"])
+      expect(childRoutes(running.fixture.agentCalls())).toEqual([`${SOL}#medium`, `${SOL}#medium`])
+    },
+    TIMEOUT,
+  )
+})
+
 describe("unpolicied agents do not read quota", () => {
   test(
     "a general agent runs without any quota request",
     async () => {
       respond = () => Response.json(credentials("0.99"))
-      const { host: running } = await run({ agent: "general", model: `${OPUS}#low` })
+      const { host: running } = await runWithQuota({ agent: "general", model: `${OPUS}#low` })
 
       expect(childRoutes(running.fixture.agentCalls())).toEqual([`${OPUS}#low`])
       expect(requests).toHaveLength(0)
@@ -121,7 +118,7 @@ describe("unknown quota never reroutes", () => {
     "a failing credentials endpoint leaves the implementer on Haiku 5.5 at medium effort",
     async () => {
       respond = () => new Response("upstream exploded", { status: 500 })
-      const { host: running } = await run({ agent: "implementer" })
+      const { host: running } = await runWithQuota({ agent: "implementer" })
 
       expect(childRoutes(running.fixture.agentCalls())).toEqual([`${HAIKU}#medium`])
       expect(requests.length).toBeGreaterThanOrEqual(1)

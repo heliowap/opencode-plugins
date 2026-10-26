@@ -2,8 +2,24 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { childRoutes, FAILED, HAIKU, OPUS, redispatching, routeOf, SOL, SONNET, toolResults, type Call, type Reply } from "./harness/fixture.ts"
-import { Host, type HostOptions } from "./harness/host.ts"
+import {
+  childRoutes,
+  dispatch,
+  FAILED,
+  HAIKU,
+  OPUS,
+  redispatching,
+  routeOf,
+  run,
+  SOL,
+  SONNET,
+  stopRuns,
+  toolParts,
+  toolResults,
+  type Call,
+  type Reply,
+} from "./harness/fixture.ts"
+import { Host } from "./harness/host.ts"
 
 const TIMEOUT = 120_000
 let host: Host | undefined
@@ -11,14 +27,8 @@ let host: Host | undefined
 afterEach(async () => {
   await host?.stop()
   host = undefined
+  await stopRuns()
 })
-
-const dispatch = (args: Record<string, unknown>, child: (call: Call) => Reply = () => ({ text: "child answer" })) =>
-  (call: Call): Reply => {
-    if (call.provider !== "fixture") return child(call)
-    if (toolResults(call.request).length) return { text: "parent done" }
-    return { tool: "subagent", args: { description: "look it up", prompt: "find the fact", ...args } }
-  }
 
 const recovering =
   (args: Record<string, unknown>, child: (call: Call) => Reply, maxRounds = 3) =>
@@ -27,14 +37,6 @@ const recovering =
       ? redispatching([{ description: "look it up", prompt: "find the fact", ...args }], maxRounds)(call.request)
       : child(call)
 
-const run = async (options: HostOptions) => {
-  host = await Host.start(options)
-  const session = await host.session()
-  await host.prompt(session, "delegate")
-  await host.settle(session)
-  return { host, session }
-}
-
 const failing =
   (routes: Record<string, number>): ((call: Call) => Reply) =>
   (call) => {
@@ -42,13 +44,6 @@ const failing =
     const status = routes[route]
     return status ? { status, error: `fixture ${status} from ${route}` } : { text: `child answer from ${route}` }
   }
-
-type ToolPart = { type: "tool"; name: string; state: { status: string; metadata: Record<string, unknown> } }
-
-const toolParts = async (host: Host, session: { id: string }) =>
-  (await host.messages(session))
-    .flatMap((message) => (Array.isArray(message.content) ? (message.content as ToolPart[]) : []))
-    .filter((part) => part.type === "tool" && part.name === "subagent")
 
 const parentToolResult = (calls: Call[]) => toolResults(calls.filter((call) => call.provider === "fixture").at(-1)!.request).at(-1)
 
@@ -261,7 +256,7 @@ describe("implementer dispatch", () => {
   )
 
   test(
-    "when both Claude routes are rate-limited, the re-dispatch runs on Sol 5.5 at medium effort",
+    "when both Claude routes are rate-limited, the re-dispatch runs on GPT-6.1 Sol at medium effort",
     async () => {
       const { host } = await run({
         script: recovering({ agent: "implementer" }, failing({ [HAIKU]: 429, [SONNET]: 429 }), 3),

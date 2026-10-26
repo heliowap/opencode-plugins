@@ -3,7 +3,7 @@ import { routeKey, type CatalogModel } from "./policy.ts"
 export type ClaudeQuota = { readonly _tag: "Unknown" } | { readonly _tag: "Known"; readonly exhausted: boolean }
 
 // A route whose account pool has less than this much quota left, in percent, is skipped.
-const FLOOR_PERCENT = 5
+export const FLOOR_PERCENT = 5
 
 type Window = "5h" | "7d"
 
@@ -19,7 +19,7 @@ const RESET: Readonly<Record<Window, string>> = {
 
 const WINDOWS: readonly Window[] = ["5h", "7d"]
 
-const UNKNOWN: ClaudeQuota = { _tag: "Unknown" }
+export const UNKNOWN: ClaudeQuota = { _tag: "Unknown" }
 
 // Reads the credential list of the CLIProxyAPI management API, as the cliproxy-quota plugin does for Claude.
 export function claudeQuota(body: unknown, now: number): ClaudeQuota {
@@ -52,15 +52,15 @@ const accountExhausted = (signals: Record<string, unknown>, now: number) =>
 
 // A window whose reset has passed, or that has no utilization signal, counts as fully available.
 function leftPercent(signals: Record<string, unknown>, window: Window, now: number) {
-  const reset = number(signals[RESET[window]])
+  const reset = numericSignal(signals[RESET[window]])
   if (reset !== undefined && reset * 1000 <= now) return 100
-  const utilization = number(signals[UTILIZATION[window]])
+  const utilization = numericSignal(signals[UTILIZATION[window]])
   if (utilization === undefined) return 100
   // Rounding trims floating-point noise, so that utilization 0.95 leaves exactly 5.
   return 100 - Math.round(utilization * 10_000) / 100
 }
 
-function number(value: unknown) {
+function numericSignal(value: unknown) {
   if (typeof value !== "string" || value.trim() === "") return undefined
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : undefined

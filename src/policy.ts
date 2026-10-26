@@ -1,3 +1,5 @@
+import { FLOOR_PERCENT } from "./quota.ts"
+
 export interface CatalogModel {
   readonly providerID: string
   readonly id: string
@@ -15,9 +17,15 @@ export interface Skip {
   readonly reason: string
 }
 
-export type Resolution =
-  | { readonly kind: "unenforced" }
-  | { readonly kind: "routes"; readonly routes: readonly Route[]; readonly skipped: readonly Skip[] }
+export interface Resolution {
+  readonly routes: readonly Route[]
+  readonly skipped: readonly Skip[]
+}
+
+export interface ResolveOptions {
+  readonly unhealthy?: ReadonlySet<string>
+  readonly exhausted?: ReadonlySet<string>
+}
 
 interface Candidate {
   readonly providerID: string
@@ -49,17 +57,19 @@ const POLICIES: Readonly<Record<string, readonly Candidate[]>> = {
   ],
 }
 
+export const isPolicied = (agent: string) => Object.hasOwn(POLICIES, agent)
+
 export const routeKey = (route: { readonly providerID: string; readonly model: string }) =>
   `${route.providerID}/${route.model}`
 
+// An agent without a policy has no routes: callers check isPolicied first and leave its model alone.
 export const resolve = (
   agent: string,
   catalog: readonly CatalogModel[],
-  unhealthy: ReadonlySet<string> = new Set(),
-  exhausted: ReadonlySet<string> = new Set(),
+  { unhealthy = new Set(), exhausted = new Set() }: ResolveOptions = {},
 ): Resolution => {
-  const policy = Object.hasOwn(POLICIES, agent) ? POLICIES[agent] : undefined
-  if (!policy) return { kind: "unenforced" }
+  const policy = isPolicied(agent) ? POLICIES[agent] : undefined
+  if (!policy) return { routes: [], skipped: [] }
   const routes: Route[] = []
   const skipped: Skip[] = []
   for (const candidate of policy) {
@@ -80,10 +90,10 @@ export const resolve = (
   const usable = available.length > 0 ? available : routes
   if (available.length > 0) {
     for (const route of routes) {
-      if (exhausted.has(routeKey(route))) skipped.push({ route: routeKey(route), reason: "account quota below 5%" })
+      if (exhausted.has(routeKey(route))) skipped.push({ route: routeKey(route), reason: `account quota below ${FLOOR_PERCENT}%` })
     }
   }
   const healthy = usable.filter((route) => !unhealthy.has(routeKey(route)))
   const failing = usable.filter((route) => unhealthy.has(routeKey(route)))
-  return { kind: "routes", routes: [...healthy, ...failing], skipped }
+  return { routes: [...healthy, ...failing], skipped }
 }
