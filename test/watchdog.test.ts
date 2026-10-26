@@ -87,6 +87,10 @@ test("ending clears calls, restarting refreshes activity, and deleting untracks 
   })
 })
 
+test("an event outside the union fails loudly instead of being ignored", () => {
+  expect(() => watch(new Map(), { _tag: "Unknown", sessionID: "child" } as never, 0, 1500)).toThrow("goal: unhandled watch event")
+})
+
 test("events for an untracked session preserve the same map", () => {
   const children: Children = new Map([["other", { parentID: "parent", running: false, lastActivity: 10, openCalls: new Set() }]])
   for (const event of [

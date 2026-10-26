@@ -22,7 +22,7 @@ import {
 } from "./prompts.ts"
 import { appendCapped, LOG_LIMIT, logPath } from "./log.ts"
 import { GoalRpc } from "./rpc.ts"
-import { RESETTING_TOOLS, resetStreak, shellCall, shellCommand, withWarning, type Streaks } from "./loop.ts"
+import { loopStep, MUTATING_TOOLS, shellCommand, withWarning, type Streaks } from "./loop.ts"
 import { commandRecord, errorRecord, logEnabled, sessionOf, toolErrorRecord, transitionRecord, type GoalTool, type TraceRecord } from "./trace.ts"
 import { stallDelay, tickInterval, watch, watchEventOf, type Children, type Stall, type WatchEvent } from "./watchdog.ts"
 
@@ -62,7 +62,6 @@ const updateInput = toolInput(UpdateInput)
 const getInput = toolInput(Schema.Struct({}))
 
 const PLANNING_AGENTS = new Set(["plan"])
-const MUTATING_TOOLS = new Set(["write", "edit", "patch", "apply_patch"])
 
 const KEY_PREFIX = "goal/"
 
@@ -77,7 +76,8 @@ interface LocationState {
   readonly continuations: Map<string, number>
   readonly watchdog: { children: Children }
   readonly loops: { streaks: Streaks }
-  readonly loopWarnings: Set<string>
+  // Calls whose result gets the loop warning, by call id, with the session that made them.
+  readonly warnedCalls: Map<string, string>
 }
 
 const LOCATIONS: Map<string, LocationState> = ((globalThis as Record<symbol, Map<string, LocationState> | undefined>)[
@@ -91,7 +91,7 @@ const locationState = (directory: string) => {
     if (!existing.continuations) Object.assign(existing, { continuations: new Map() })
     if (!existing.watchdog) Object.assign(existing, { watchdog: { children: new Map() } })
     if (!existing.loops) Object.assign(existing, { loops: { streaks: new Map() } })
-    if (!existing.loopWarnings) Object.assign(existing, { loopWarnings: new Set() })
+    if (!existing.warnedCalls) Object.assign(existing, { warnedCalls: new Map() })
     return { state: existing, fresh: false }
   }
   const state: LocationState = {
@@ -103,7 +103,7 @@ const locationState = (directory: string) => {
     continuations: new Map(),
     watchdog: { children: new Map() },
     loops: { streaks: new Map() },
-    loopWarnings: new Set(),
+    warnedCalls: new Map(),
   }
   LOCATIONS.set(directory, state)
   return { state, fresh: true }
@@ -178,7 +178,7 @@ export default Plugin.define({
       const goalOutput = ({ goal }: { readonly goal: Goal | undefined }) => ({ goal: goal ?? null })
 
       const { state, fresh } = locationState(ctx.location.directory)
-      const { activity, agents, resumePending, closingSteps, retries, continuations, watchdog, loops, loopWarnings } = state
+      const { activity, agents, resumePending, closingSteps, retries, continuations, watchdog, loops, warnedCalls } = state
       const key = (sessionID: string) => `${KEY_PREFIX}${sessionID}`
       const planning = (sessionID: string) => PLANNING_AGENTS.has(agents.get(sessionID) ?? "")
 
@@ -258,8 +258,13 @@ export default Plugin.define({
         ctx.session
           .interrupt({ sessionID: stall.sessionID as never })
           .pipe(
-            Effect.andThen(
-              send(stall.parentID, subagentStalledText(stall.sessionID, stall.idleMs), { resume: true, delivery: "queue" }),
+            Effect.as(true),
+            Effect.catchCause((cause) => logFailure("watchdog interrupt", stall.sessionID)(cause).pipe(Effect.as(false))),
+            Effect.flatMap((interrupted) =>
+              send(stall.parentID, subagentStalledText(stall.sessionID, stall.idleMs, interrupted), {
+                resume: true,
+                delivery: "queue",
+              }),
             ),
             Effect.catchCause(logFailure("watchdog", stall.sessionID)),
           )
@@ -270,6 +275,12 @@ export default Plugin.define({
           watchdog.children = result.children
           return result.stalls
         }).pipe(Effect.flatMap((stalls) => Effect.forEach(stalls, stalled, { discard: true })))
+
+      // A session that ends (or is deleted) can leave warned calls whose result never arrives.
+      const forgetWarnings = (sessionID: string) =>
+        Effect.sync(() => {
+          for (const [callID, owner] of warnedCalls) if (owner === sessionID) warnedCalls.delete(callID)
+        })
 
       yield* Effect.forkIn(
         Effect.forever(
@@ -442,31 +453,26 @@ export default Plugin.define({
         })
       })
 
-      // Hooks here never fail: a loop guard that broke a tool call would be worse than the loop it watches.
+      // A loop-guard failure is logged and dropped: it must never break the tool call it watches.
       yield* ctx.tool.hook("execute.before", (event) =>
         Effect.sync(() => {
-          const command = shellCommand(event.tool, event.input)
-          if (command !== undefined) {
-            const call = shellCall(loops.streaks, event.sessionID, command)
-            loops.streaks = call.streaks
-            if (call.warn) loopWarnings.add(event.id)
-          } else if (RESETTING_TOOLS.has(event.tool)) {
-            loops.streaks = resetStreak(loops.streaks, event.sessionID)
-          }
-        }),
+          const step = loopStep(loops.streaks, event.sessionID, event.tool, event.input)
+          loops.streaks = step.streaks
+          if (step.warn) warnedCalls.set(event.id, event.sessionID)
+        }).pipe(Effect.catchCause(logFailure("loop guard", event.sessionID))),
       )
 
       yield* ctx.tool.hook("execute.after", (event) =>
         Effect.sync(() => {
           if (event.status === "completed" && MUTATING_TOOLS.has(event.tool)) activity.add(event.sessionID)
-          if (!loopWarnings.delete(event.id)) return
+          if (!warnedCalls.delete(event.id)) return
           const text = loopWarningText(shellCommand(event.tool, event.input) ?? "")
           if (event.status === "error") {
             event.error = new Tool.Error({ message: `${event.error.message}\n\n${text}` })
-          } else if (event.result.content !== undefined) {
+          } else {
             event.result = { ...event.result, content: withWarning(event.result.content, text) }
           }
-        }),
+        }).pipe(Effect.catchCause(logFailure("loop guard", event.sessionID))),
       )
 
       yield* ctx.session.hook("context", (event) =>
@@ -496,24 +502,36 @@ export default Plugin.define({
             return onEvent(sessionID, { _tag: "Usage", tokens: tokens.input + tokens.output + tokens.reasoning, closing })
           }
           case "session.execution.succeeded":
-            return onEvent(event.data.sessionID, {
-              _tag: "TurnEnded",
-              activity: activity.has(event.data.sessionID),
-              planning: planning(event.data.sessionID),
-              delayMs: cooldownMs,
-            })
+            return forgetWarnings(event.data.sessionID).pipe(
+              Effect.andThen(
+                onEvent(event.data.sessionID, {
+                  _tag: "TurnEnded",
+                  activity: activity.has(event.data.sessionID),
+                  planning: planning(event.data.sessionID),
+                  delayMs: cooldownMs,
+                }),
+              ),
+            )
           case "session.execution.interrupted":
-            return onEvent(event.data.sessionID, { _tag: "Interrupted", reason: event.data.reason })
+            return forgetWarnings(event.data.sessionID).pipe(
+              Effect.andThen(onEvent(event.data.sessionID, { _tag: "Interrupted", reason: event.data.reason })),
+            )
           case "session.execution.failed":
-            return onEvent(event.data.sessionID, {
-              _tag: "Failed",
-              message: event.data.error.message,
-              ...(event.data.error.status !== undefined && { status: event.data.error.status }),
-            })
+            return forgetWarnings(event.data.sessionID).pipe(
+              Effect.andThen(
+                onEvent(event.data.sessionID, {
+                  _tag: "Failed",
+                  message: event.data.error.message,
+                  ...(event.data.error.status !== undefined && { status: event.data.error.status }),
+                }),
+              ),
+            )
           case "session.moved":
             return onEvent(event.data.sessionID, { _tag: "Moved", directory: event.data.location.directory })
           case "session.deleted":
-            return onEvent(event.data.sessionID, { _tag: "Clear" }, { quiet: true })
+            return forgetWarnings(event.data.sessionID).pipe(
+              Effect.andThen(onEvent(event.data.sessionID, { _tag: "Clear" }, { quiet: true })),
+            )
           default:
             return Effect.void
         }
@@ -548,10 +566,12 @@ export default Plugin.define({
 
       yield* ctx.event.subscribe().pipe(
         Stream.runForEach((event) => {
+          const sessionID = sessionOf(event)
           const watchEvent = watchEventOf(event, ctx.location.directory)
+          // Each part has its own catchCause, so a watchdog failure cannot drop the goal handler's event.
           return (watchEvent ? applyWatch(watchEvent) : Effect.void).pipe(
-            Effect.andThen(handle(event)),
-            Effect.catchCause(logFailure(event.type, sessionOf(event))),
+            Effect.catchCause(logFailure("watchdog", sessionID)),
+            Effect.andThen(handle(event).pipe(Effect.catchCause(logFailure(event.type, sessionID)))),
           )
         }),
         Effect.catchCause(logFailure("event stream")),

@@ -220,10 +220,16 @@ test("continuation defines each status the model can set", () => {
 })
 
 test("watchdog notice identifies the interrupted child, elapsed time, and recovery choices", () => {
-  const text = subagentStalledText("ses_child", 125 * 60_000)
+  const text = subagentStalledText("ses_child", 125 * 60_000, true)
   expect(text).toContain("[goal] Watchdog: subagent session ses_child showed no activity for 2 h 5 min and was interrupted.")
   expect(text).toContain("Continue the child with `subagent` and sessionID `ses_child`, redispatch with a narrower prompt, or do the work yourself. Do not wait for it.")
   expect(text).not.toContain("{{")
+})
+
+test("watchdog notice says when the interrupt failed, so the parent still hears about the child", () => {
+  expect(subagentStalledText("ses_child", 125 * 60_000, false)).toContain(
+    "[goal] Watchdog: subagent session ses_child showed no activity for 2 h 5 min and could not be interrupted.",
+  )
 })
 
 test("loop warning includes a short command and tells the agent to change course instead of polling", () => {

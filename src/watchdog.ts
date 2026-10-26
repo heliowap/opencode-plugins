@@ -1,9 +1,13 @@
 export const DEFAULT_STALL_MS = 600_000
+const MAX_TICK_MS = 60_000
+const MIN_TICK_MS = 50
+const TICKS_PER_STALL = 4
 
 export const stallDelay = (option: unknown): number =>
   typeof option === "number" && option > 0 && option < Infinity ? option : DEFAULT_STALL_MS
 
-export const tickInterval = (stallMs: number) => Math.min(60_000, Math.max(50, Math.floor(stallMs / 4)))
+export const tickInterval = (stallMs: number) =>
+  Math.min(MAX_TICK_MS, Math.max(MIN_TICK_MS, Math.floor(stallMs / TICKS_PER_STALL)))
 
 export interface Child {
   readonly parentID: string
@@ -34,48 +38,57 @@ export const watch = (children: Children, event: WatchEvent, now: number, stallM
   readonly children: Children
   readonly stalls: readonly Stall[]
 } => {
-  const next = new Map(children)
-  const stalls: Stall[] = []
-  if (event._tag === "Tick") {
-    for (const [sessionID, child] of children) {
-      const idleMs = now - child.lastActivity
-      if (child.running && child.openCalls.size === 0 && idleMs >= stallMs) {
-        stalls.push({ sessionID, parentID: child.parentID, idleMs })
-        next.set(sessionID, { ...child, running: false })
-      }
-    }
-    return { children: next, stalls }
+  const untouched = { children, stalls: [] as Stall[] }
+  // Events for a session the watchdog does not track change nothing.
+  const update = (sessionID: string, change: (child: Child) => Child | undefined) => {
+    const child = children.get(sessionID)
+    if (!child) return untouched
+    const next = new Map(children)
+    const changed = change(child)
+    if (changed) next.set(sessionID, changed)
+    else next.delete(sessionID)
+    return { children: next, stalls: [] as Stall[] }
   }
-  if (event._tag === "Created") {
-    next.set(event.sessionID, { parentID: event.parentID, running: false, lastActivity: now, openCalls: new Set() })
-    return { children: next, stalls }
-  }
-  const child = children.get(event.sessionID)
-  if (!child) return { children, stalls }
   switch (event._tag) {
-    case "Started":
-      next.set(event.sessionID, { ...child, running: true, lastActivity: now, openCalls: new Set() })
-      break
-    case "Activity":
-      next.set(event.sessionID, { ...child, lastActivity: now })
-      break
-    case "ToolCalled":
-      next.set(event.sessionID, { ...child, lastActivity: now, openCalls: new Set([...child.openCalls, event.callID]) })
-      break
-    case "ToolSettled": {
-      const openCalls = new Set(child.openCalls)
-      openCalls.delete(event.callID)
-      next.set(event.sessionID, { ...child, lastActivity: now, openCalls })
-      break
+    case "Tick": {
+      const next = new Map(children)
+      const stalls: Stall[] = []
+      for (const [sessionID, child] of children) {
+        const idleMs = now - child.lastActivity
+        if (child.running && child.openCalls.size === 0 && idleMs >= stallMs) {
+          stalls.push({ sessionID, parentID: child.parentID, idleMs })
+          next.set(sessionID, { ...child, running: false })
+        }
+      }
+      return { children: next, stalls }
     }
+    case "Created": {
+      const next = new Map(children)
+      next.set(event.sessionID, { parentID: event.parentID, running: false, lastActivity: now, openCalls: new Set() })
+      return { children: next, stalls: [] }
+    }
+    case "Started":
+      return update(event.sessionID, (child) => ({ ...child, running: true, lastActivity: now, openCalls: new Set() }))
+    case "Activity":
+      return update(event.sessionID, (child) => ({ ...child, lastActivity: now }))
+    case "ToolCalled":
+      return update(event.sessionID, (child) => ({ ...child, lastActivity: now, openCalls: new Set([...child.openCalls, event.callID]) }))
+    case "ToolSettled":
+      return update(event.sessionID, (child) => {
+        const openCalls = new Set(child.openCalls)
+        openCalls.delete(event.callID)
+        return { ...child, lastActivity: now, openCalls }
+      })
     case "Ended":
-      next.set(event.sessionID, { ...child, running: false, openCalls: new Set() })
-      break
+      return update(event.sessionID, (child) => ({ ...child, running: false, openCalls: new Set() }))
     case "Deleted":
-      next.delete(event.sessionID)
-      break
+      return update(event.sessionID, () => undefined)
+    default: {
+      // Assigning to never makes a new variant a compile error here; at run time an unknown tag fails loudly.
+      const unhandled: never = event
+      throw new Error(`goal: unhandled watch event ${JSON.stringify(unhandled)}`)
+    }
   }
-  return { children: next, stalls }
 }
 
 export const watchEventOf = (event: { readonly type: string; readonly data?: unknown }, directory: string): WatchEvent | undefined => {

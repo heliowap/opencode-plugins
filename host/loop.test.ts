@@ -13,7 +13,7 @@ afterEach(async () => {
 
 describe("loop guard", () => {
   test(
-    "L1 the third identical shell command gets a warning, and no other result does",
+    "LG1 the third identical shell command gets a warning, and no other result does",
     async () => {
       const script: Script = (request) => {
         const done = toolResults(request).length
@@ -34,7 +34,7 @@ describe("loop guard", () => {
   )
 
   test(
-    "L2 alternating commands never reach the loop limit",
+    "LG2 alternating commands never reach the loop limit",
     async () => {
       const script: Script = (request) => {
         const done = toolResults(request).length

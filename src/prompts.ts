@@ -2,6 +2,7 @@ import { readFileSync, realpathSync } from "node:fs"
 import { pathToFileURL } from "node:url"
 import { formatTokens } from "./format.ts"
 import type { Check, Goal } from "./goal.ts"
+import { LOOP_LIMIT } from "./loop.ts"
 
 const moduleUrl = pathToFileURL(realpathSync(new URL(import.meta.url)))
 const template = (name: string) => readFileSync(new URL(`../templates/${name}.md`, moduleUrl), "utf8").trim()
@@ -43,10 +44,18 @@ export const budgetLimitPrompt = (goal: Goal, now: number) => render(templates.b
 export const objectiveUpdatedPrompt = (goal: Goal, now: number) => render(templates.objectiveUpdated, values(goal, now))
 export const sessionContext = (goal: Goal, now: number) => render(templates.sessionContext, values(goal, now))
 
-export const subagentStalledText = (sessionID: string, idleMs: number) =>
-  render(templates.subagentStalled, { sessionID, elapsed: formatElapsed(idleMs) })
+// A failed interrupt still gets a notice: the child is already marked not running, so no later tick would report it.
+export const subagentStalledText = (sessionID: string, idleMs: number, interrupted: boolean) =>
+  render(templates.subagentStalled, {
+    sessionID,
+    elapsed: formatElapsed(idleMs),
+    outcome: interrupted ? "was interrupted" : "could not be interrupted",
+  })
 
-export const loopWarningText = (command: string) => render(templates.loopWarning, { command: command.slice(0, 200) })
+const LOOP_COMMAND_LIMIT = 200
+
+export const loopWarningText = (command: string) =>
+  render(templates.loopWarning, { command: command.slice(0, LOOP_COMMAND_LIMIT), limit: String(LOOP_LIMIT) })
 
 const usage = (goal: Goal) =>
   goal.tokenBudget === null
