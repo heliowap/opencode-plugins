@@ -1,9 +1,25 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { FLOOR_PERCENT } from "../src/quota.ts"
-import { childRoutes, dispatch, HAIKU, OPUS, routeOf, run, SOL, SONNET, stopRuns, toolParts } from "./harness/fixture.ts"
+import {
+  childRoutes,
+  dispatch,
+  HAIKU,
+  OPUS,
+  redispatching,
+  routeOf,
+  run,
+  SOL,
+  SONNET,
+  stopRuns,
+  toolParts,
+  type Call,
+  type Reply,
+} from "./harness/fixture.ts"
 import { Host } from "./harness/host.ts"
 
 const TIMEOUT = 120_000
+// The test waits out the 60-second quota cache and a rate-limited child, so it needs more than TIMEOUT.
+const LONG_TIMEOUT = 180_000
 const KEY = "stub-key"
 const SKIP_REASON = `account quota below ${FLOOR_PERCENT}%`
 
@@ -96,6 +112,44 @@ describe("retry with Claude quota exhausted", () => {
       expect(childRoutes(running.fixture.agentCalls())).toEqual([`${SOL}#medium`, `${SOL}#medium`])
     },
     TIMEOUT,
+  )
+})
+
+describe("a Haiku child that started before Claude was exhausted", () => {
+  test(
+    "fails fast to the parent when rate-limited after Claude is exhausted, instead of retrying Haiku in place",
+    async () => {
+      let haikuCalls = 0
+      const child = (call: Call): Reply => {
+        if (routeOf(call) !== HAIKU) return { text: `child answer from ${routeOf(call)}` }
+        // Only the first Haiku call is rate-limited, and only after 80 seconds, by which time the later dispatch has read the exhausted quota.
+        return haikuCalls++ === 0 ? { status: 429, error: "rate limited", delayMs: 80_000 } : { text: `child answer from ${HAIKU}` }
+      }
+      const script = (call: Call): Reply =>
+        call.provider === "fixture"
+          ? redispatching([{ agent: "implementer", description: "look it up", prompt: "find the fact" }])(call.request)
+          : child(call)
+      const host = await Host.start({ script, env: quotaEnv() })
+      try {
+        const early = await host.session()
+        await host.prompt(early, "delegate")
+        await host.until(() => host.fixture.agentCalls("cli_proxy").length > 0)
+        // The quota read is cached for 60 seconds, so wait it out: the next dispatch then reads the exhausted account.
+        await Bun.sleep(61_000)
+        respond = () => Response.json(credentials("0.99"))
+        const late = await host.session()
+        await host.prompt(late, "delegate again")
+        await host.until(() => host.fixture.agentCalls("cli_proxy_openai").length > 0)
+        await host.until(() => childRoutes(host.fixture.agentCalls()).length >= 3, 120_000)
+        await host.settle(early)
+
+        expect((await toolParts(host, early)).map((part) => part.state.status)).toEqual(["error", "completed"])
+        expect(childRoutes(host.fixture.agentCalls())).toEqual([`${HAIKU}#medium`, `${SOL}#medium`, `${SOL}#medium`])
+      } finally {
+        await host.stop()
+      }
+    },
+    LONG_TIMEOUT,
   )
 })
 

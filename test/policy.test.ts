@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { isPolicied, resolve, type CatalogModel } from "../src/policy.ts"
+import { isPolicied, resolve } from "../src/policy.ts"
 import { FLOOR_PERCENT } from "../src/quota.ts"
+import type { CatalogModel } from "../src/route.ts"
 
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 const DIRECT: CatalogModel = { providerID: "openai", id: "gpt-6.1-sol", variants: EFFORTS }

@@ -65,7 +65,9 @@ available, so the dispatch moves there.
   with the reason `account quota below 5%`.
 - **Retry agrees with dispatch.** A provider failure is judged against the same
   exhausted set the dispatch used, so a route with no fallback is retried in place
-  instead of failing back to the parent.
+  instead of failing back to the parent. A child that started before a quota read
+  and is rate-limited after it fails fast the same way, when another route is
+  available.
 
 Configuration comes from two environment variables, read by the OpenCode service:
 

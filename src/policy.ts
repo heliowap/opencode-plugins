@@ -1,10 +1,8 @@
 import { FLOOR_PERCENT } from "./quota.ts"
+import { routeKey, type CatalogModel } from "./route.ts"
 
-export interface CatalogModel {
-  readonly providerID: string
-  readonly id: string
-  readonly variants: readonly string[]
-}
+// The reason a route carries in `skipped` when the exhaustion check removed it.
+export const QUOTA_SKIP_REASON = `account quota below ${FLOOR_PERCENT}%`
 
 export interface Route {
   readonly providerID: string
@@ -59,9 +57,6 @@ const POLICIES: Readonly<Record<string, readonly Candidate[]>> = {
 
 export const isPolicied = (agent: string) => Object.hasOwn(POLICIES, agent)
 
-export const routeKey = (route: { readonly providerID: string; readonly model: string }) =>
-  `${route.providerID}/${route.model}`
-
 // An agent without a policy has no routes: callers check isPolicied first and leave its model alone.
 export const resolve = (
   agent: string,
@@ -90,7 +85,7 @@ export const resolve = (
   const usable = available.length > 0 ? available : routes
   if (available.length > 0) {
     for (const route of routes) {
-      if (exhausted.has(routeKey(route))) skipped.push({ route: routeKey(route), reason: `account quota below ${FLOOR_PERCENT}%` })
+      if (exhausted.has(routeKey(route))) skipped.push({ route: routeKey(route), reason: QUOTA_SKIP_REASON })
     }
   }
   const healthy = usable.filter((route) => !unhealthy.has(routeKey(route)))

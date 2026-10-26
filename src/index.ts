@@ -1,9 +1,10 @@
 import { Plugin } from "@opencode/plugin"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import { classify } from "./failure.ts"
-import { isPolicied, resolve, routeKey, type CatalogModel, type Route, type Skip } from "./policy.ts"
+import { isPolicied, QUOTA_SKIP_REASON, resolve, type Route, type Skip } from "./policy.ts"
 import { exhaustedRoutes } from "./quota.ts"
 import { quotaSettings, quotaSource } from "./quota-source.ts"
+import { routeKey, type CatalogModel } from "./route.ts"
 
 const COOLDOWN_MS = 10 * 60 * 1000
 
@@ -53,11 +54,14 @@ export default Plugin.define({
       if (!isPolicied(event.agent)) return
       const resolution = resolve(event.agent, known, { unhealthy: unhealthy(), exhausted })
       const failed = routeKey({ providerID: event.model.providerID, model: event.model.id })
-      if (!resolution.routes.some((route) => routeKey(route) === failed)) return
+      // A child started before the last quota read may run on a route that read has since skipped.
+      const skippedForQuota = resolution.skipped.some((skip) => skip.route === failed && skip.reason === QUOTA_SKIP_REASON)
+      if (!skippedForQuota && !resolution.routes.some((route) => routeKey(route) === failed)) return
       const classification = classify(event.error)
       if (classification.kind === "task") return
       unhealthyUntil.set(failed, Date.now() + COOLDOWN_MS)
-      const hasFallback = resolution.routes.some((route) => routeKey(route) !== failed)
+      const nonExhausted = resolution.routes.filter((route) => !exhausted.has(routeKey(route)))
+      const hasFallback = nonExhausted.some((route) => routeKey(route) !== failed)
       if (classification.skipSameRouteRetries && hasFallback) event.decision = { retry: false }
     })
 
