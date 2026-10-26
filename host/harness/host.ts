@@ -90,10 +90,12 @@ export class Host {
           },
           ...options.providers,
         },
-        ...(options.pluginSpec && { plugins: [options.pluginSpec] }),
-        ...(!options.pluginSpec && {
-          plugins: [{ package: `file://${join(REPO, "src")}`, options: { continuationDelayMs: 0, ...options.pluginOptions } }],
-        }),
+        plugins: [
+          {
+            package: options.pluginSpec ?? `file://${join(REPO, "src")}`,
+            options: { continuationDelayMs: 0, ...options.pluginOptions },
+          },
+        ],
         ...(options.allowAll && { permissions: [{ action: "*", resource: "*", effect: "allow" }] }),
       }),
     )
