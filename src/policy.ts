@@ -30,11 +30,15 @@ const RESEARCH: readonly Candidate[] = [
   { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "low" },
 ]
 
-// Research, explore and planner rules were approved directly by the user.
+// Research, explore, planner and implementer rules were approved directly by the user.
 const POLICIES: Readonly<Record<string, readonly Candidate[]>> = {
   researcher: RESEARCH,
   explore: RESEARCH,
   planner: [{ providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "high" }],
+  implementer: [
+    { providerID: "cli_proxy", model: "cpa-claude-haiku-5-5", effort: "medium" },
+    { providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", effort: "medium" },
+  ],
 }
 
 export const routeKey = (route: { readonly providerID: string; readonly model: string }) =>
@@ -44,6 +48,7 @@ export const resolve = (
   agent: string,
   catalog: readonly CatalogModel[],
   unhealthy: ReadonlySet<string> = new Set(),
+  exhausted: ReadonlySet<string> = new Set(),
 ): Resolution => {
   const policy = Object.hasOwn(POLICIES, agent) ? POLICIES[agent] : undefined
   if (!policy) return { kind: "unenforced" }
@@ -62,7 +67,15 @@ export const resolve = (
     }
     routes.push({ providerID: candidate.providerID, model: candidate.model, variant: candidate.effort })
   }
-  const healthy = routes.filter((route) => !unhealthy.has(routeKey(route)))
-  const failing = routes.filter((route) => unhealthy.has(routeKey(route)))
+  const available = routes.filter((route) => !exhausted.has(routeKey(route)))
+  // When every route is exhausted, keep them all: failing open beats having no route at all.
+  const usable = available.length > 0 ? available : routes
+  if (available.length > 0) {
+    for (const route of routes) {
+      if (exhausted.has(routeKey(route))) skipped.push({ route: routeKey(route), reason: "account quota below 5%" })
+    }
+  }
+  const healthy = usable.filter((route) => !unhealthy.has(routeKey(route)))
+  const failing = usable.filter((route) => unhealthy.has(routeKey(route)))
   return { kind: "routes", routes: [...healthy, ...failing], skipped }
 }

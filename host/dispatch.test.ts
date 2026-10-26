@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { childRoutes, FAILED, OPUS, redispatching, routeOf, SONNET, toolResults, type Call, type Reply } from "./harness/fixture.ts"
+import { childRoutes, FAILED, HAIKU, OPUS, redispatching, routeOf, SONNET, toolResults, type Call, type Reply } from "./harness/fixture.ts"
 import { Host, type HostOptions } from "./harness/host.ts"
 
 const TIMEOUT = 120_000
@@ -238,13 +238,24 @@ describe("explore and planner dispatch", () => {
   )
 })
 
-describe("roles without an approved policy", () => {
+describe("implementer dispatch", () => {
   test(
-    "an implementer keeps the model the parent chose",
+    "an implementer runs on Haiku 5.5 at medium effort even when the parent names Opus 5.5 at high",
     async () => {
       const { host } = await run({ script: dispatch({ agent: "implementer", model: `${OPUS}#high` }) })
 
-      expect(childRoutes(host.fixture.agentCalls())).toEqual([`${OPUS}#high`])
+      expect(childRoutes(host.fixture.agentCalls())).toEqual([`${HAIKU}#medium`])
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "a rate-limited Haiku route fails fast, and the re-dispatch runs on Sonnet 5.5 at medium effort",
+    async () => {
+      const { host } = await run({ script: recovering({ agent: "implementer" }, failing({ [HAIKU]: 429 })) })
+
+      expect(childRoutes(host.fixture.agentCalls())).toEqual([`${HAIKU}#medium`, `${SONNET}#medium`])
+      expect(parentToolResult(host.fixture.calls)).toContain(`child answer from ${SONNET}`)
     },
     TIMEOUT,
   )

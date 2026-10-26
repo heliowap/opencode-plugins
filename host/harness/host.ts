@@ -10,7 +10,7 @@ const EFFORTS = ["low", "medium", "high"].map((id) => ({ id, settings: { reasoni
 export const ROUTE_PROVIDERS = {
   openai: { "gpt-6.1-sol": EFFORTS },
   cli_proxy_openai: { "gpt-6.1-sol": EFFORTS },
-  cli_proxy: { "cpa-claude-sonnet-5-5": EFFORTS, "cpa-claude-opus-5-5": EFFORTS },
+  cli_proxy: { "cpa-claude-haiku-5-5": EFFORTS, "cpa-claude-sonnet-5-5": EFFORTS, "cpa-claude-opus-5-5": EFFORTS },
 } as const
 
 export interface HostOptions {
@@ -20,6 +20,7 @@ export interface HostOptions {
   readonly extraPlugins?: readonly string[]
   readonly configFiles?: Readonly<Record<string, string>>
   readonly projectFiles?: Readonly<Record<string, string>>
+  readonly env?: Record<string, string>
   readonly permissions?: (configDir: string) => ReadonlyArray<{ readonly action: string; readonly resource: string; readonly effect: string }>
 }
 
@@ -93,8 +94,12 @@ export class Host {
         await writeFile(join(base, path), content)
       }
     }
+    const inherited: Record<string, string> = { ...(process.env as Record<string, string>) }
+    // Host tests must never reach the user's real proxy, which can IP-ban on bad keys.
+    delete inherited.CLIPROXY_URL
+    delete inherited.CLIPROXY_MANAGEMENT_KEY
     const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
+      ...inherited,
       HOME: join(root, "home"),
       XDG_CONFIG_HOME: join(root, "config"),
       XDG_DATA_HOME: join(root, "data"),
@@ -103,6 +108,7 @@ export class Host {
       OPENCODE_SERVER_PASSWORD: PASSWORD,
       OPENCODE_DISABLE_AUTOUPDATE: "1",
       OPENCODE_DISABLE_MODELS_FETCH: "1",
+      ...options.env,
     }
     delete env.BUN_BE_BUN
     const port = freePort()

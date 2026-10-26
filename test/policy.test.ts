@@ -6,11 +6,68 @@ const DIRECT: CatalogModel = { providerID: "openai", id: "gpt-6.1-sol", variants
 const PROXY_SOL: CatalogModel = { providerID: "cli_proxy_openai", id: "gpt-6.1-sol", variants: EFFORTS }
 const OPUS: CatalogModel = { providerID: "cli_proxy", id: "cpa-claude-opus-5-5", variants: EFFORTS }
 const SONNET: CatalogModel = { providerID: "cli_proxy", id: "cpa-claude-sonnet-5-5", variants: EFFORTS }
-const FULL = [DIRECT, PROXY_SOL, OPUS, SONNET]
+const HAIKU: CatalogModel = { providerID: "cli_proxy", id: "cpa-claude-haiku-5-5", variants: EFFORTS }
+const FULL = [DIRECT, PROXY_SOL, OPUS, SONNET, HAIKU]
+const HAIKU_ROUTE = "cli_proxy/cpa-claude-haiku-5-5"
+const SONNET_ROUTE = "cli_proxy/cpa-claude-sonnet-5-5"
+const OPUS_ROUTE = "cli_proxy/cpa-claude-opus-5-5"
 
 describe("roles without an approved policy", () => {
-  test.each(["implementer", "general", "build", "comment-sicko"])("%s keeps its own model selection", (agent) => {
+  test.each(["general", "poteto-agent", "build", "comment-sicko"])("%s keeps its own model selection", (agent) => {
     expect(resolve(agent, FULL)).toEqual({ kind: "unenforced" })
+  })
+})
+
+describe("implementer policy", () => {
+  test("Haiku 5.5 comes first, with Sonnet 5.5 as fallback, both at medium effort", () => {
+    expect(resolve("implementer", FULL)).toEqual({
+      kind: "routes",
+      routes: [
+        { providerID: "cli_proxy", model: "cpa-claude-haiku-5-5", variant: "medium" },
+        { providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", variant: "medium" },
+      ],
+      skipped: [],
+    })
+  })
+
+  test("Haiku 5.5 without a medium variant is skipped with a reason", () => {
+    const haikuWithoutMedium = { ...HAIKU, variants: ["low", "high"] }
+
+    expect(resolve("implementer", [haikuWithoutMedium, SONNET])).toEqual({
+      kind: "routes",
+      routes: [{ providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", variant: "medium" }],
+      skipped: [{ route: HAIKU_ROUTE, reason: "variant medium is not available" }],
+    })
+  })
+
+  test("an exhausted Haiku 5.5 leaves Sonnet 5.5 alone, with a skip entry", () => {
+    expect(resolve("implementer", FULL, new Set(), new Set([HAIKU_ROUTE]))).toEqual({
+      kind: "routes",
+      routes: [{ providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", variant: "medium" }],
+      skipped: [{ route: HAIKU_ROUTE, reason: "account quota below 5%" }],
+    })
+  })
+
+  test("when every route is exhausted, the declared order is kept and nothing is skipped", () => {
+    expect(resolve("implementer", FULL, new Set(), new Set([HAIKU_ROUTE, SONNET_ROUTE]))).toEqual({
+      kind: "routes",
+      routes: [
+        { providerID: "cli_proxy", model: "cpa-claude-haiku-5-5", variant: "medium" },
+        { providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", variant: "medium" },
+      ],
+      skipped: [],
+    })
+  })
+
+  test("with every route exhausted, an unhealthy route still moves behind the other", () => {
+    expect(resolve("implementer", FULL, new Set([HAIKU_ROUTE]), new Set([HAIKU_ROUTE, SONNET_ROUTE]))).toMatchObject({
+      routes: [{ model: "cpa-claude-sonnet-5-5" }, { model: "cpa-claude-haiku-5-5" }],
+      skipped: [],
+    })
+  })
+
+  test("an exhausted route outside the policy has no effect", () => {
+    expect(resolve("implementer", FULL, new Set(), new Set([OPUS_ROUTE]))).toEqual(resolve("implementer", FULL))
   })
 })
 
