@@ -43,7 +43,7 @@ Keep a comment only for a non-obvious why, such as a host quirk. State the obser
 
 - Test behavior: call `step`, `parseCommand`, and the prompt functions the way the plugin does, and assert against literal expected values with `toEqual`. For rendered templates, assert the filled slots with `toContain` on a literal line instead of pinning the whole template text.
 - Every reducer branch has a test. A new event or effect ships with its tests.
-- `bun test` and `bun run typecheck` pass before every commit.
+- The checks that `bun run verify:changed` selects pass before every commit. `src/verify-plan.ts` is the single source of the selection rules; do not restate them elsewhere.
 - `bun run mutation` keeps a 100% mutation score on the files in `mutate` of `stryker.config.json`. Pure logic goes in one of those files. A surviving mutant means a missing test or redundant code: add the test, or delete the code. Do not exclude mutants.
 
 ## Host canaries
