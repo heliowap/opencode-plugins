@@ -6,17 +6,21 @@ provider fallback.
 The parent session can pass any `model` to the `subagent` tool. For agents with a
 policy, an `execute.before` hook replaces it with the policy route, so a delegated
 agent always runs where you decided it should. The plugin does not wrap the
-`subagent` tool itself: in OpenCode 2.0.25 a wrapped tool reports the wrong error
-for parallel calls that fail.
+`subagent` tool itself: OpenCode 2.0.25 reported the first failure's error for
+every parallel call that failed once a plugin wrapped the tool. That bug is fixed
+in 2.1.4. The regression canary in `host/upstream` stays in the suite and fails if
+it comes back.
 
 ## Policy
 
 | Agent | Routes, in order |
 | --- | --- |
-| `researcher`, `explore` | `cli_proxy/cpa-claude-sonnet-5-5#medium` → `cli_proxy/cpa-claude-opus-5-5#low` |
-| `planner` | `cli_proxy/cpa-claude-opus-5-5#high` |
+| `implementer` | `cli_proxy/cpa-claude-haiku-5-5#medium` → `cli_proxy/cpa-claude-sonnet-5-5#medium` → `cli_proxy_openai/gpt-6.1-sol#medium` |
+| `researcher`, `explore` | `cli_proxy/cpa-claude-sonnet-5-5#medium` → `cli_proxy/cpa-claude-opus-5-5#low` → `cli_proxy_openai/gpt-6.1-sol#medium` |
+| `planner` | `cli_proxy/cpa-claude-opus-5-5#high` → `cli_proxy_openai/gpt-6.1-sol#high` |
+| `general`, `poteto-agent` | the parent's model (no policy) |
 
-Every other agent keeps the model the parent chose. Routes are defined in
+Every other agent also keeps the model the parent chose. Routes are defined in
 [`src/policy.ts`](src/policy.ts).
 
 - A route missing from the model catalog, or lacking the effort variant, is
@@ -39,6 +43,51 @@ next route. This works the same for foreground and background dispatches.
 Each successful result carries `metadata.modelPolicy`: the agent, the requested
 model, the chosen route, the skipped routes and the demoted routes. Prompts are
 never recorded.
+
+## Quota-aware routing
+
+Before it dispatches a policied agent, the plugin reads Claude quota and skips
+the Claude routes when the account pool is exhausted. The Sol route stays
+available, so the dispatch moves there.
+
+- **Rule.** A Claude account is exhausted when less than 5% is left in its 5h or
+  7d window. The pool is judged by the best enabled Claude account: it is
+  exhausted only when every enabled account is. Accounts of other providers, and
+  disabled accounts, are ignored.
+- **Scope.** Only Claude routes (`cli_proxy/cpa-claude-*`) are skipped. Sol is
+  never skipped for quota.
+- **Unknown quota.** Missing configuration, an unreachable proxy, an error or
+  malformed response, or no enabled Claude account all count as not exhausted.
+  Unknown quota never skips a route.
+- **All routes exhausted.** The declared order is kept, so the dispatch still
+  runs somewhere.
+- **Skips are visible.** Each skipped route appears in `metadata.modelPolicy.skipped`
+  with the reason `account quota below 5%`.
+- **Retry agrees with dispatch.** A provider failure is judged against the same
+  exhausted set the dispatch used, so a route with no fallback is retried in place
+  instead of failing back to the parent.
+
+Configuration comes from two environment variables, read by the OpenCode service:
+
+- `CLIPROXY_URL`: the CLIProxyAPI base URL. Default `http://127.0.0.1:8317`. An
+  empty value uses the default.
+- `CLIPROXY_MANAGEMENT_KEY`: the management key for the credentials endpoint.
+
+Both must be set in the **OpenCode service's** environment, not only in an
+interactive shell. A key exported only in `~/.zshrc` is not seen by a service
+started outside an interactive shell. In that case quota stays unknown and the
+feature silently does nothing: nothing is skipped and nothing is reported as an
+error.
+
+Timing and access:
+
+- The plugin reads `GET /v8/management/credentials` on the proxy and never calls
+  Anthropic directly.
+- A result is cached for 60 seconds. A read that takes longer than 2 seconds
+  counts as unknown.
+- After a 401, 403 or 429 from the credentials endpoint, the plugin does not call
+  it again for 10 minutes. Quota reads in that window are unknown.
+- Agents without a policy never read quota.
 
 ## Coverage
 
@@ -70,14 +119,16 @@ opencode api get /api/plugin
 ## Development
 
 ```sh
-bun test            # policy and failure classification
+bun test            # policy, failure classification and quota unit tests
 bun run typecheck
 bun test ./host     # starts real `opencode serve` instances against fixture providers
 ```
 
 The host tests need the `opencode` binary on `PATH` (or `OPENCODE_BIN`). They
-were written against OpenCode 2.0.25. Tests that load your global plugins or the
-`code-review` skill are skipped when those files are missing.
+were written against OpenCode 2.0.25 and pass on 2.1.4. Tests that load your
+global plugins or the `code-review` skill are skipped when those files are
+missing. The host harness clears `CLIPROXY_URL` and `CLIPROXY_MANAGEMENT_KEY`, so
+the tests never reach your real proxy.
 
 ## License
 
