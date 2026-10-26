@@ -36,12 +36,10 @@ Every claim here comes from a real `opencode serve` process with no mocked plugi
 | L2 | `OPENCODE_GOAL_LOG=0` writes no log | ✅ | no `goal.jsonl` after the same scenario |
 | L3 | The plugin option `"log": false` in `opencode.jsonc` writes no log | ✅ | no `goal.jsonl`; L4 loads the same `file://` spec without options and writes it |
 | L4 | The same plugin spec without options writes the log | ✅ | `goal.jsonl` exists |
-| W1 | A silent subagent is interrupted and the parent receives a notice | ✅ on 2.1.4 locally; CI pins 2.0.24, not yet run there | exactly one `Subagent cancelled` tool result in the last request, exactly 1 child request, exactly 1 `[goal] Watchdog:` notice request. Run with `watchdogStallMs: 1500` |
-| W2 | A subagent running a shell command is not stalled while the call is open | ✅ on 2.1.4 locally; CI pins 2.0.24, not yet run there | exactly one `child done` tool result in the last request, no `[goal] Watchdog:` notice in any request. The shell call lasts 3 s, twice the threshold |
-| LG1 | The third identical shell command gets a warning, and no other result does | ✅ on 2.1.4 locally; CI pins 2.0.24, not yet run there | per-result warning flags in the last request, exactly `false, false, true, false`, exactly 5 model requests |
-| LG2 | Alternating shell commands and file writes never reach the loop limit | ✅ on 2.1.4 locally; CI pins 2.0.24, not yet run there | no loop warning in any tool result, exactly 6 model requests |
-
-The loop-guard canaries are numbered LG1 and LG2 here, because L1 and L2 name the trace-log canaries above.
+| W1 | A silent subagent is interrupted and the parent receives a notice | ✅ on 2.1.4 locally; in the CI matrix, not yet run on 2.0.24 | exactly one `Subagent cancelled` tool result in the last request, exactly 1 child request, exactly 1 `[goal] Watchdog:` notice request. Run with `watchdogStallMs: 1500` |
+| W2 | A subagent running a shell command is not stalled while the call is open | ✅ on 2.1.4 locally; in the CI matrix, not yet run on 2.0.24 | exactly one `child done` tool result in the last request, no `[goal] Watchdog:` notice in any request. The shell call lasts 3 s, twice the threshold |
+| LG1 | The third identical shell command gets a warning, and no other result does | ✅ on 2.1.4 locally; in the CI matrix, not yet run on 2.0.24 | per-result warning flags in the last request, exactly `false, false, true, false`, exactly 5 model requests |
+| LG2 | Alternating shell commands and file writes never reach the loop limit | ✅ on 2.1.4 locally; in the CI matrix, not yet run on 2.0.24 | no loop warning in any tool result, exactly 6 model requests |
 | H1 | A goal created through `opencode run --server` is finished by the server after the command exits | ✅ | real `opencode run --format json` and `opencode api` against the canary server, goal read through the `goal.get` RPC as `complete`, `a.txt`/`b.txt` contents, exactly 8 model requests |
 | H2 | `opencode run --standalone` stops the goal after its first turn | ⚠️ known limitation | stored `active`, no `a.txt`/`b.txt`, fewer than 8 model requests. The command returns after its first turn and its private server exits with it |
 | V1 | `--verify` refuses completion until the command exits 0 in the goal's directory | ✅ | first tool result names exit code 3 and the output, stored `complete` with `verifyFailures: 1`, `lastExitCode: 0` |
@@ -61,6 +59,8 @@ The loop-guard canaries are numbered LG1 and LG2 here, because L1 and L2 name th
 | T6 | Clicking the line above the input opens the goal controls, which set a `5K` budget and then pause the goal | ✅ | SGR click in tmux, stored `tokenBudget: 5000`, then stored `paused` |
 | T7 | `Goal controls` in the command palette opens the controls, which clear the goal after a confirm | ✅ | keys in tmux, stored goal gone |
 | T8 | `Goal controls` in the command palette reports when the session has no unfinished goal | ✅ | keys in tmux, screen text |
+
+The loop-guard canaries are numbered LG1 and LG2 here, because L1 and L2 name the trace-log canaries above.
 
 T1 to T8 start the real `opencode` terminal client against the canary server inside tmux, then read the screen with `tmux capture-pane`. CI runs them twice: once with the linked source, and once with the plugin installed from the commit under test (`tui-package`). The installed run caught a bug the linked run could not see. An installed package resolves `solid-js` to its own copy, which the host renderer does not track, so the line stayed empty. The status line now keeps its state in the host's `context.storage.memory` store and imports nothing from `solid-js`.
 

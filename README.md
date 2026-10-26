@@ -73,7 +73,7 @@ The agent can also create, read, and finish goals with the `goal_create`, `goal_
 - With `--verify "cmd"`, `goal_update` with `complete` first runs `cmd` with `sh -c` in the goal's directory. The goal completes only if it exits 0. Otherwise the goal stays open, the plugin counts the failed check, and the model gets the exit code and the end of the output. Interrupting the turn kills the command. Only the user can set the command: `goal_create` cannot, because a plugin tool cannot ask for `bash` permission per call.
 - A user interrupt pauses the goal. A turn that fails with an HTTP 5xx error, after OpenCode's own retries, is retried up to three times, 30 s, 2 min, and 5 min later; the goal stays active meanwhile. Any other failure, including a rate limit (429), and a fourth server error in a row block the goal so retries cannot loop.
 - Turns run by the `plan` agent neither count nor continue the goal.
-- A subagent that shows no activity for 10 minutes is interrupted, and its parent gets a queued `[goal] Watchdog:` notice. The `watchdogStallMs` plugin option sets that threshold in milliseconds. At the default threshold the watchdog checks every 60 s, so detection lands between 10 and 11 minutes after the last activity. It never interrupts a child with an open tool call, however long the call runs. If the interrupt itself fails, the notice says the child could not be interrupted.
+- A subagent that shows no activity for 10 minutes is interrupted, and its parent gets a queued `[goal] Watchdog:` notice. The `watchdogStallMs` plugin option sets that threshold in milliseconds. At the default threshold the watchdog checks every 60 s, so detection lands between 10 and 11 minutes after the last activity. It never interrupts a child with an open tool call, however long the call runs. If the interrupt itself fails, the notice says the child could not be interrupted and may still be running, so the parent checks it before redispatching.
 - The loop guard watches shell commands. The third identical command in a row (whitespace at the ends ignored) gets a loop warning appended to its result, telling the agent to change course instead of polling. It warns once per streak and never blocks a call. A file edit (`write`, `edit`, `patch`, `apply_patch`) or a subagent dispatch starts a new streak; reads and searches do not.
 
 All state rules live in the pure reducer `step` in `src/goal.ts`. `src/index.ts` only translates OpenCode events into `GoalEvent`s and runs the returned `GoalEffect`.
@@ -122,7 +122,7 @@ The subagent watchdog and the shell loop guard have these limits:
 - A tool call that never returns, such as a shell command with `timeout: 0`, is never interrupted, because the watchdog does not interrupt an open tool call.
 - Subagents created before a server restart are not watched.
 - A child that has its own goal gets that goal paused when the watchdog interrupts it, because the interrupt API takes no reason. The goal stays paused until the user resumes it.
-- The watchdog and loop-guard canaries were verified on OpenCode v2.1.4. CI pins 2.0.24, where they run in the `watchdog` and `loop` matrix suites.
+- The watchdog and loop-guard canaries were verified on OpenCode v2.1.4. They run in the CI matrix, not yet run on 2.0.24.
 
 ## Attribution
 
