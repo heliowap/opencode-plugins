@@ -3,8 +3,8 @@ import { OPUS, text, toolResults, type Call, type Reply } from "../harness/fixtu
 import { Host } from "../harness/host.ts"
 
 // Upstream OpenCode bug: once a plugin wraps a tool's execute through tool.transform, parallel
-// calls that fail all report the first failure's error. Marked failing until OpenCode fixes it;
-// when this starts passing, bun reports it so the marker can be removed.
+// calls that fail all report the first failure's error. It reproduced on OpenCode 2.0.25 and is
+// fixed by 2.1.4. The test stays as a regression canary: if it fails again, the bug is back.
 
 const CASES = [1, 3, 5, 7]
 
@@ -16,7 +16,7 @@ const caseOf = (call: Call) => {
   return -1
 }
 
-test.failing(
+test(
   "parallel failing calls of a wrapped tool each report their own error",
   async () => {
     const host = await Host.start({
