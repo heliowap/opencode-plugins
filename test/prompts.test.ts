@@ -14,7 +14,7 @@ import {
   render,
   sessionContext,
   statusText,
-  subagentStalledText,
+  stallNotice,
   verifyFailedText,
 } from "../src/prompts.ts"
 
@@ -219,17 +219,23 @@ test("continuation defines each status the model can set", () => {
   )
 })
 
-test("watchdog notice identifies the interrupted child, elapsed time, and recovery choices", () => {
-  const text = subagentStalledText("ses_child", 125 * 60_000, true)
-  expect(text).toContain("[goal] Watchdog: subagent session ses_child showed no activity for 2 h 5 min and was interrupted.")
-  expect(text).toContain("Continue the child with `subagent` and sessionID `ses_child`, redispatch with a narrower prompt, or do the work yourself. Do not wait for it.")
-  expect(text).not.toContain("{{")
+const stalled = { sessionID: "ses_child", parentID: "ses_parent", idleMs: 125 * 60_000 }
+
+test("an interrupted child's notice goes to its parent, which may continue, redispatch, or do the work", () => {
+  const notice = stallNotice(stalled, true)
+  expect(notice.parentID).toEqual("ses_parent")
+  expect(notice.text).toContain("[goal] Watchdog: subagent session ses_child showed no activity for 2 h 5 min and was interrupted.")
+  expect(notice.text).toContain("Continue the child with `subagent` and sessionID `ses_child`, redispatch with a narrower prompt, or do the work yourself. Do not wait for it.")
+  expect(notice.text).not.toContain("{{")
 })
 
-test("watchdog notice says when the interrupt failed, so the parent still hears about the child", () => {
-  expect(subagentStalledText("ses_child", 125 * 60_000, false)).toContain(
-    "[goal] Watchdog: subagent session ses_child showed no activity for 2 h 5 min and could not be interrupted.",
-  )
+test("a child that could not be interrupted may still run, so the parent checks it before redispatching", () => {
+  const notice = stallNotice(stalled, false)
+  expect(notice.parentID).toEqual("ses_parent")
+  expect(notice.text).toContain("[goal] Watchdog: subagent session ses_child showed no activity for 2 h 5 min and could not be interrupted.")
+  expect(notice.text).toContain("It may still be running. Check its state before acting, and do not redispatch on top of it.")
+  expect(notice.text).not.toContain("Continue the child")
+  expect(notice.text).not.toContain("{{")
 })
 
 test("loop warning includes a short command and tells the agent to change course instead of polling", () => {

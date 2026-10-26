@@ -25,7 +25,6 @@ const resetStreak = (streaks: Streaks, sessionID: string): Streaks => {
   return next
 }
 
-// The whole streak decision for one tool call. The guard never blocks a call; it only reports the warn.
 export const loopStep = (
   streaks: Streaks,
   sessionID: string,
@@ -36,6 +35,9 @@ export const loopStep = (
   if (command !== undefined) return shellCall(streaks, sessionID, command)
   return { streaks: RESETTING_TOOLS.has(tool) ? resetStreak(streaks, sessionID) : streaks, warn: false }
 }
+
+export const forget = (warned: ReadonlyMap<string, string>, sessionID: string): Map<string, string> =>
+  new Map([...warned].filter(([, owner]) => owner !== sessionID))
 
 export const withWarning = (content: string | ReadonlyArray<Content> | undefined, text: string): string | ReadonlyArray<Content> =>
   content === undefined ? text : typeof content === "string" ? `${content}\n\n${text}` : [...content, { type: "text", text }]

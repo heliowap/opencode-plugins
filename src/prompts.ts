@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url"
 import { formatTokens } from "./format.ts"
 import type { Check, Goal } from "./goal.ts"
 import { LOOP_LIMIT } from "./loop.ts"
+import type { Stall } from "./watchdog.ts"
 
 const moduleUrl = pathToFileURL(realpathSync(new URL(import.meta.url)))
 const template = (name: string) => readFileSync(new URL(`../templates/${name}.md`, moduleUrl), "utf8").trim()
@@ -45,12 +46,18 @@ export const objectiveUpdatedPrompt = (goal: Goal, now: number) => render(templa
 export const sessionContext = (goal: Goal, now: number) => render(templates.sessionContext, values(goal, now))
 
 // A failed interrupt still gets a notice: the child is already marked not running, so no later tick would report it.
-export const subagentStalledText = (sessionID: string, idleMs: number, interrupted: boolean) =>
-  render(templates.subagentStalled, {
-    sessionID,
-    elapsed: formatElapsed(idleMs),
+// After a failed interrupt the child may still run, so the advice must not send the parent to continue it.
+export const stallNotice = (stall: Stall, interrupted: boolean) => ({
+  parentID: stall.parentID,
+  text: render(templates.subagentStalled, {
+    elapsed: formatElapsed(stall.idleMs),
     outcome: interrupted ? "was interrupted" : "could not be interrupted",
-  })
+    advice: interrupted
+      ? `Continue the child with \`subagent\` and sessionID \`${stall.sessionID}\`, redispatch with a narrower prompt, or do the work yourself. Do not wait for it.`
+      : "It may still be running. Check its state before acting, and do not redispatch on top of it.",
+    sessionID: stall.sessionID,
+  }),
+})
 
 const LOOP_COMMAND_LIMIT = 200
 

@@ -39,7 +39,6 @@ export const watch = (children: Children, event: WatchEvent, now: number, stallM
   readonly stalls: readonly Stall[]
 } => {
   const untouched = { children, stalls: [] as Stall[] }
-  // Events for a session the watchdog does not track change nothing.
   const update = (sessionID: string, change: (child: Child) => Child | undefined) => {
     const child = children.get(sessionID)
     if (!child) return untouched

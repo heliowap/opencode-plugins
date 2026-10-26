@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { LOOP_LIMIT, MUTATING_TOOLS, RESETTING_TOOLS, loopStep, shellCommand, withWarning, type Streaks } from "../src/loop.ts"
+import { forget, LOOP_LIMIT, MUTATING_TOOLS, RESETTING_TOOLS, loopStep, shellCommand, withWarning, type Streaks } from "../src/loop.ts"
 
 const shell = (command: string) => ({ command })
 
@@ -86,4 +86,11 @@ test("warnings append to strings or content parts without losing tool output", (
 
 test("a completed result with no content carries the warning alone", () => {
   expect(withWarning(undefined, "stop polling")).toEqual("stop polling")
+})
+
+test("forgetting a session drops only its warned calls and leaves the given map unchanged", () => {
+  const warned = new Map([["call-1", "one"], ["call-2", "two"], ["call-3", "one"]])
+  expect(forget(warned, "one")).toEqual(new Map([["call-2", "two"]]))
+  expect(forget(warned, "missing")).toEqual(new Map([["call-1", "one"], ["call-2", "two"], ["call-3", "one"]]))
+  expect(warned).toEqual(new Map([["call-1", "one"], ["call-2", "two"], ["call-3", "one"]]))
 })

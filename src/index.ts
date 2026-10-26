@@ -16,13 +16,13 @@ import {
   loopWarningText,
   objectiveUpdatedPrompt,
   sessionContext,
+  stallNotice,
   statusText,
-  subagentStalledText,
   verifyFailedText,
 } from "./prompts.ts"
 import { appendCapped, LOG_LIMIT, logPath } from "./log.ts"
 import { GoalRpc } from "./rpc.ts"
-import { loopStep, MUTATING_TOOLS, shellCommand, withWarning, type Streaks } from "./loop.ts"
+import { forget, loopStep, MUTATING_TOOLS, shellCommand, withWarning, type Streaks } from "./loop.ts"
 import { commandRecord, errorRecord, logEnabled, sessionOf, toolErrorRecord, transitionRecord, type GoalTool, type TraceRecord } from "./trace.ts"
 import { stallDelay, tickInterval, watch, watchEventOf, type Children, type Stall, type WatchEvent } from "./watchdog.ts"
 
@@ -76,8 +76,7 @@ interface LocationState {
   readonly continuations: Map<string, number>
   readonly watchdog: { children: Children }
   readonly loops: { streaks: Streaks }
-  // Calls whose result gets the loop warning, by call id, with the session that made them.
-  readonly warnedCalls: Map<string, string>
+  readonly warned: { calls: Map<string, string> }
 }
 
 const LOCATIONS: Map<string, LocationState> = ((globalThis as Record<symbol, Map<string, LocationState> | undefined>)[
@@ -91,7 +90,7 @@ const locationState = (directory: string) => {
     if (!existing.continuations) Object.assign(existing, { continuations: new Map() })
     if (!existing.watchdog) Object.assign(existing, { watchdog: { children: new Map() } })
     if (!existing.loops) Object.assign(existing, { loops: { streaks: new Map() } })
-    if (!existing.warnedCalls) Object.assign(existing, { warnedCalls: new Map() })
+    if (!existing.warned) Object.assign(existing, { warned: { calls: new Map() } })
     return { state: existing, fresh: false }
   }
   const state: LocationState = {
@@ -103,7 +102,7 @@ const locationState = (directory: string) => {
     continuations: new Map(),
     watchdog: { children: new Map() },
     loops: { streaks: new Map() },
-    warnedCalls: new Map(),
+    warned: { calls: new Map() },
   }
   LOCATIONS.set(directory, state)
   return { state, fresh: true }
@@ -178,7 +177,7 @@ export default Plugin.define({
       const goalOutput = ({ goal }: { readonly goal: Goal | undefined }) => ({ goal: goal ?? null })
 
       const { state, fresh } = locationState(ctx.location.directory)
-      const { activity, agents, resumePending, closingSteps, retries, continuations, watchdog, loops, warnedCalls } = state
+      const { activity, agents, resumePending, closingSteps, retries, continuations, watchdog, loops, warned } = state
       const key = (sessionID: string) => `${KEY_PREFIX}${sessionID}`
       const planning = (sessionID: string) => PLANNING_AGENTS.has(agents.get(sessionID) ?? "")
 
@@ -260,12 +259,10 @@ export default Plugin.define({
           .pipe(
             Effect.as(true),
             Effect.catchCause((cause) => logFailure("watchdog interrupt", stall.sessionID)(cause).pipe(Effect.as(false))),
-            Effect.flatMap((interrupted) =>
-              send(stall.parentID, subagentStalledText(stall.sessionID, stall.idleMs, interrupted), {
-                resume: true,
-                delivery: "queue",
-              }),
-            ),
+            Effect.flatMap((interrupted) => {
+              const notice = stallNotice(stall, interrupted)
+              return send(notice.parentID, notice.text, { resume: true, delivery: "queue" })
+            }),
             Effect.catchCause(logFailure("watchdog", stall.sessionID)),
           )
 
@@ -279,7 +276,7 @@ export default Plugin.define({
       // A session that ends (or is deleted) can leave warned calls whose result never arrives.
       const forgetWarnings = (sessionID: string) =>
         Effect.sync(() => {
-          for (const [callID, owner] of warnedCalls) if (owner === sessionID) warnedCalls.delete(callID)
+          warned.calls = forget(warned.calls, sessionID)
         })
 
       yield* Effect.forkIn(
@@ -458,14 +455,14 @@ export default Plugin.define({
         Effect.sync(() => {
           const step = loopStep(loops.streaks, event.sessionID, event.tool, event.input)
           loops.streaks = step.streaks
-          if (step.warn) warnedCalls.set(event.id, event.sessionID)
+          if (step.warn) warned.calls.set(event.id, event.sessionID)
         }).pipe(Effect.catchCause(logFailure("loop guard", event.sessionID))),
       )
 
       yield* ctx.tool.hook("execute.after", (event) =>
         Effect.sync(() => {
           if (event.status === "completed" && MUTATING_TOOLS.has(event.tool)) activity.add(event.sessionID)
-          if (!warnedCalls.delete(event.id)) return
+          if (!warned.calls.delete(event.id)) return
           const text = loopWarningText(shellCommand(event.tool, event.input) ?? "")
           if (event.status === "error") {
             event.error = new Tool.Error({ message: `${event.error.message}\n\n${text}` })
