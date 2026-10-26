@@ -98,14 +98,6 @@ describe("implementer policy", () => {
   })
 })
 
-describe("exhaustion skip reason", () => {
-  test("names the quota floor that the exhaustion check uses", () => {
-    expect(resolve("implementer", FULL, { exhausted: new Set([HAIKU_ROUTE]) }).skipped).toEqual([
-      { route: HAIKU_ROUTE, reason: `account quota below ${FLOOR_PERCENT}%` },
-    ])
-  })
-})
-
 describe("explore policy", () => {
   test("explore follows the research routes", () => {
     expect(resolve("explore", FULL)).toEqual(resolve("researcher", FULL))

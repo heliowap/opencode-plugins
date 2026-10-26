@@ -93,8 +93,8 @@ Timing and access:
 
 ## Coverage
 
-The plugin wraps the `subagent` tool. These paths create child sessions without
-it and are not enforced:
+The plugin intercepts `subagent` via `execute.before`. These paths create child
+sessions without it and are not enforced:
 
 - Commands with `subagent: true` (or whose agent has `mode: subagent`). They use
   the command's `model`, then the agent's default model.
