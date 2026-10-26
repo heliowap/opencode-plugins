@@ -11,6 +11,8 @@ const templates = {
   budgetLimit: template("budget_limit"),
   objectiveUpdated: template("objective_updated"),
   sessionContext: template("session_context"),
+  subagentStalled: template("subagent_stalled"),
+  loopWarning: template("loop_warning"),
 }
 
 export const render = (source: string, values: Record<string, string>) =>
@@ -40,6 +42,11 @@ export const continuationPrompt = (goal: Goal, now: number) => render(templates.
 export const budgetLimitPrompt = (goal: Goal, now: number) => render(templates.budgetLimit, values(goal, now))
 export const objectiveUpdatedPrompt = (goal: Goal, now: number) => render(templates.objectiveUpdated, values(goal, now))
 export const sessionContext = (goal: Goal, now: number) => render(templates.sessionContext, values(goal, now))
+
+export const subagentStalledText = (sessionID: string, idleMs: number) =>
+  render(templates.subagentStalled, { sessionID, elapsed: formatElapsed(idleMs) })
+
+export const loopWarningText = (command: string) => render(templates.loopWarning, { command: command.slice(0, 200) })
 
 const usage = (goal: Goal) =>
   goal.tokenBudget === null

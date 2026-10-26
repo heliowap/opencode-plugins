@@ -9,10 +9,12 @@ import {
   budgetLimitPrompt,
   COMMAND_HELP,
   continuationPrompt,
+  loopWarningText,
   objectiveUpdatedPrompt,
   render,
   sessionContext,
   statusText,
+  subagentStalledText,
   verifyFailedText,
 } from "../src/prompts.ts"
 
@@ -215,4 +217,27 @@ test("continuation defines each status the model can set", () => {
   expect(prompt).toContain(
     "When some requirements are done and others are blocked, the goal is not complete: keep moving any requirement that can still move, and use `blocked` only once none can.",
   )
+})
+
+test("watchdog notice identifies the interrupted child, elapsed time, and recovery choices", () => {
+  const text = subagentStalledText("ses_child", 125 * 60_000)
+  expect(text).toContain("[goal] Watchdog: subagent session ses_child showed no activity for 2 h 5 min and was interrupted.")
+  expect(text).toContain("Continue the child with `subagent` and sessionID `ses_child`, redispatch with a narrower prompt, or do the work yourself. Do not wait for it.")
+  expect(text).not.toContain("{{")
+})
+
+test("loop warning includes a short command and tells the agent to change course instead of polling", () => {
+  const text = loopWarningText("git status")
+  expect(text).toContain("[goal] Loop guard: you ran the same shell command 3 times in a row:\ngit status")
+  expect(text).toContain("Stop. Explain why earlier runs did not give what you expected, pick a different next step, and end the turn rather than poll.")
+  expect(text).not.toContain("{{")
+})
+
+test("loop warning cuts the command at 200 characters", () => {
+  const command = `${"1234567890".repeat(19)}abcdefghijDO_NOT_INCLUDE`
+  const text = loopWarningText(command)
+  expect(text).toContain(
+    "[goal] Loop guard: you ran the same shell command 3 times in a row:\n1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890abcdefghij\n",
+  )
+  expect(text).not.toContain("DO_NOT_INCLUDE")
 })
