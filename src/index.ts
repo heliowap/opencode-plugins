@@ -2,6 +2,8 @@ import { Plugin } from "@opencode/plugin"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import { classify } from "./failure.ts"
 import { resolve, routeKey, type CatalogModel, type Route, type Skip } from "./policy.ts"
+import { exhaustedRoutes } from "./quota.ts"
+import { quotaSettings, quotaSource } from "./quota-source.ts"
 
 const COOLDOWN_MS = 10 * 60 * 1000
 
@@ -29,6 +31,7 @@ export default Plugin.define({
   async setup(ctx) {
     const unhealthyUntil = new Map<string, number>()
     const decisions = new Map<string, Decision>()
+    const quota = quotaSource(quotaSettings(process.env))
 
     const catalog = async (): Promise<CatalogModel[]> =>
       (await ctx.model.list()).data.map((model) => ({
@@ -60,8 +63,11 @@ export default Plugin.define({
       if (event.tool !== "subagent" || !isSubagentInput(event.input)) return
       const input = event.input
       known = await catalog()
+      // Unpolicied agents keep their own model, so they never wait on a quota read.
+      if (resolve(input.agent, known).kind === "unenforced") return
+      const exhausted = exhaustedRoutes(known, await quota.claude())
       const failing = unhealthy()
-      const resolution = resolve(input.agent, known, failing)
+      const resolution = resolve(input.agent, known, failing, exhausted)
       if (resolution.kind === "unenforced") return
       const route = resolution.routes[0]
       if (!route) throw new ToolError({ message: `Model policy for ${input.agent}: no allowed route is available.` })

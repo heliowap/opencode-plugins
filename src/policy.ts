@@ -25,19 +25,27 @@ interface Candidate {
   readonly effort: string
 }
 
+// The OpenAI route is the final fallback: it is not on the Claude account pool, so quota skips have somewhere to go.
+const SOL = { providerID: "cli_proxy_openai", model: "gpt-6.1-sol" }
+
 const RESEARCH: readonly Candidate[] = [
   { providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", effort: "medium" },
   { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "low" },
+  { ...SOL, effort: "medium" },
 ]
 
 // Research, explore, planner and implementer rules were approved directly by the user.
 const POLICIES: Readonly<Record<string, readonly Candidate[]>> = {
   researcher: RESEARCH,
   explore: RESEARCH,
-  planner: [{ providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "high" }],
+  planner: [
+    { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "high" },
+    { ...SOL, effort: "high" },
+  ],
   implementer: [
     { providerID: "cli_proxy", model: "cpa-claude-haiku-5-5", effort: "medium" },
     { providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", effort: "medium" },
+    { ...SOL, effort: "medium" },
   ],
 }
 

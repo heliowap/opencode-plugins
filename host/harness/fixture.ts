@@ -29,6 +29,7 @@ export type Script = (call: Call) => Reply
 export const SONNET = "cli_proxy/cpa-claude-sonnet-5-5"
 export const OPUS = "cli_proxy/cpa-claude-opus-5-5"
 export const HAIKU = "cli_proxy/cpa-claude-haiku-5-5"
+export const SOL = "cli_proxy_openai/gpt-6.1-sol"
 
 export const routeOf = (call: Call) => `${call.provider}/${call.request.model}`
 

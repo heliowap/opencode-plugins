@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { childRoutes, FAILED, HAIKU, OPUS, redispatching, routeOf, SONNET, toolResults, type Call, type Reply } from "./harness/fixture.ts"
+import { childRoutes, FAILED, HAIKU, OPUS, redispatching, routeOf, SOL, SONNET, toolResults, type Call, type Reply } from "./harness/fixture.ts"
 import { Host, type HostOptions } from "./harness/host.ts"
 
 const TIMEOUT = 120_000
@@ -124,7 +124,7 @@ describe("research dispatch", () => {
   test(
     "with no allowed route available the dispatch fails explicitly instead of using another model",
     async () => {
-      const { host } = await run({ script: dispatch({ agent: "researcher" }), omit: ["cli_proxy"] })
+      const { host } = await run({ script: dispatch({ agent: "researcher" }), omit: ["cli_proxy", "cli_proxy_openai"] })
 
       expect(childRoutes(host.fixture.agentCalls())).toEqual([])
       expect(parentToolResult(host.fixture.calls)).toContain("no allowed route is available")
@@ -256,6 +256,19 @@ describe("implementer dispatch", () => {
 
       expect(childRoutes(host.fixture.agentCalls())).toEqual([`${HAIKU}#medium`, `${SONNET}#medium`])
       expect(parentToolResult(host.fixture.calls)).toContain(`child answer from ${SONNET}`)
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "when both Claude routes are rate-limited, the re-dispatch runs on Sol 5.5 at medium effort",
+    async () => {
+      const { host } = await run({
+        script: recovering({ agent: "implementer" }, failing({ [HAIKU]: 429, [SONNET]: 429 }), 3),
+      })
+
+      expect(childRoutes(host.fixture.agentCalls())).toEqual([`${HAIKU}#medium`, `${SONNET}#medium`, `${SOL}#medium`])
+      expect(parentToolResult(host.fixture.calls)).toContain(`child answer from ${SOL}`)
     },
     TIMEOUT,
   )
