@@ -13,14 +13,18 @@ import {
   budgetLimitPrompt,
   COMMAND_HELP,
   continuationPrompt,
+  loopWarningText,
   objectiveUpdatedPrompt,
   sessionContext,
   statusText,
+  subagentStalledText,
   verifyFailedText,
 } from "./prompts.ts"
 import { appendCapped, LOG_LIMIT, logPath } from "./log.ts"
 import { GoalRpc } from "./rpc.ts"
+import { RESETTING_TOOLS, resetStreak, shellCall, shellCommand, withWarning, type Streaks } from "./loop.ts"
 import { commandRecord, errorRecord, logEnabled, sessionOf, toolErrorRecord, transitionRecord, type GoalTool, type TraceRecord } from "./trace.ts"
+import { stallDelay, tickInterval, watch, watchEventOf, type Children, type Stall, type WatchEvent } from "./watchdog.ts"
 
 const CreateInput = Schema.Struct({
   objective: Schema.String.annotate({
@@ -71,6 +75,9 @@ interface LocationState {
   readonly closingSteps: Map<string, string>
   readonly retries: Map<string, { readonly attempt: number; readonly at: number }>
   readonly continuations: Map<string, number>
+  readonly watchdog: { children: Children }
+  readonly loops: { streaks: Streaks }
+  readonly loopWarnings: Set<string>
 }
 
 const LOCATIONS: Map<string, LocationState> = ((globalThis as Record<symbol, Map<string, LocationState> | undefined>)[
@@ -82,6 +89,9 @@ const locationState = (directory: string) => {
   if (existing) {
     // A running server may still hold bookkeeping created before cooldowns were added.
     if (!existing.continuations) Object.assign(existing, { continuations: new Map() })
+    if (!existing.watchdog) Object.assign(existing, { watchdog: { children: new Map() } })
+    if (!existing.loops) Object.assign(existing, { loops: { streaks: new Map() } })
+    if (!existing.loopWarnings) Object.assign(existing, { loopWarnings: new Set() })
     return { state: existing, fresh: false }
   }
   const state: LocationState = {
@@ -91,6 +101,9 @@ const locationState = (directory: string) => {
     closingSteps: new Map(),
     retries: new Map(),
     continuations: new Map(),
+    watchdog: { children: new Map() },
+    loops: { streaks: new Map() },
+    loopWarnings: new Set(),
   }
   LOCATIONS.set(directory, state)
   return { state, fresh: true }
@@ -165,7 +178,7 @@ export default Plugin.define({
       const goalOutput = ({ goal }: { readonly goal: Goal | undefined }) => ({ goal: goal ?? null })
 
       const { state, fresh } = locationState(ctx.location.directory)
-      const { activity, agents, resumePending, closingSteps, retries, continuations } = state
+      const { activity, agents, resumePending, closingSteps, retries, continuations, watchdog, loops, loopWarnings } = state
       const key = (sessionID: string) => `${KEY_PREFIX}${sessionID}`
       const planning = (sessionID: string) => PLANNING_AGENTS.has(agents.get(sessionID) ?? "")
 
@@ -236,6 +249,37 @@ export default Plugin.define({
           ),
           Effect.asVoid,
         )
+
+      // A silent child is interrupted without `resume`: with a pending steer, resume would hand the
+      // child to a successor instead of cancelling it. The parent notice goes through `send` directly,
+      // because `queue` skips while a goal continuation is pending.
+      const stallMs = stallDelay(ctx.options.watchdogStallMs)
+      const stalled = (stall: Stall) =>
+        ctx.session
+          .interrupt({ sessionID: stall.sessionID as never })
+          .pipe(
+            Effect.andThen(
+              send(stall.parentID, subagentStalledText(stall.sessionID, stall.idleMs), { resume: true, delivery: "queue" }),
+            ),
+            Effect.catchCause(logFailure("watchdog", stall.sessionID)),
+          )
+
+      const applyWatch = (event: WatchEvent) =>
+        Effect.sync(() => {
+          const result = watch(watchdog.children, event, now(), stallMs)
+          watchdog.children = result.children
+          return result.stalls
+        }).pipe(Effect.flatMap((stalls) => Effect.forEach(stalls, stalled, { discard: true })))
+
+      yield* Effect.forkIn(
+        Effect.forever(
+          Effect.sleep(tickInterval(stallMs)).pipe(
+            Effect.andThen(applyWatch({ _tag: "Tick" })),
+            Effect.catchCause(logFailure("watchdog tick")),
+          ),
+        ),
+        scope,
+      )
 
       const perform = (sessionID: string, goal: Goal | undefined, effect: GoalEffect) => {
         switch (effect._tag) {
@@ -398,9 +442,30 @@ export default Plugin.define({
         })
       })
 
+      // Hooks here never fail: a loop guard that broke a tool call would be worse than the loop it watches.
+      yield* ctx.tool.hook("execute.before", (event) =>
+        Effect.sync(() => {
+          const command = shellCommand(event.tool, event.input)
+          if (command !== undefined) {
+            const call = shellCall(loops.streaks, event.sessionID, command)
+            loops.streaks = call.streaks
+            if (call.warn) loopWarnings.add(event.id)
+          } else if (RESETTING_TOOLS.has(event.tool)) {
+            loops.streaks = resetStreak(loops.streaks, event.sessionID)
+          }
+        }),
+      )
+
       yield* ctx.tool.hook("execute.after", (event) =>
         Effect.sync(() => {
           if (event.status === "completed" && MUTATING_TOOLS.has(event.tool)) activity.add(event.sessionID)
+          if (!loopWarnings.delete(event.id)) return
+          const text = loopWarningText(shellCommand(event.tool, event.input) ?? "")
+          if (event.status === "error") {
+            event.error = new Tool.Error({ message: `${event.error.message}\n\n${text}` })
+          } else if (event.result.content !== undefined) {
+            event.result = { ...event.result, content: withWarning(event.result.content, text) }
+          }
         }),
       )
 
@@ -482,9 +547,13 @@ export default Plugin.define({
       yield* startup.pipe(Effect.catchCause(logFailure("recovery")))
 
       yield* ctx.event.subscribe().pipe(
-        Stream.runForEach((event) =>
-          handle(event).pipe(Effect.catchCause(logFailure(event.type, sessionOf(event)))),
-        ),
+        Stream.runForEach((event) => {
+          const watchEvent = watchEventOf(event, ctx.location.directory)
+          return (watchEvent ? applyWatch(watchEvent) : Effect.void).pipe(
+            Effect.andThen(handle(event)),
+            Effect.catchCause(logFailure(event.type, sessionOf(event))),
+          )
+        }),
         Effect.catchCause(logFailure("event stream")),
         Effect.forkScoped,
       )
