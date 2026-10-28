@@ -5,6 +5,7 @@ import { isPolicied, QUOTA_SKIP_REASON, resolve, type Route, type Skip } from ".
 import { exhaustedRoutes } from "./quota.ts"
 import { quotaSettings, quotaSource } from "./quota-source.ts"
 import { routeKey, type CatalogModel } from "./route.ts"
+import { isBlockedModel, userOnlyMessage } from "./routes.ts"
 
 const COOLDOWN_MS = 10 * 60 * 1000
 
@@ -23,6 +24,11 @@ interface Decision {
 }
 
 const selection = (route: Route) => `${route.providerID}/${route.model}#${route.variant}`
+
+const rejectUserOnly = (input: unknown) => {
+  const message = userOnlyMessage(input)
+  if (message) throw new ToolError({ message })
+}
 
 const isSubagentInput = (input: unknown): input is SubagentInput =>
   typeof input === "object" && input !== null && typeof (input as { agent?: unknown }).agent === "string"
@@ -48,6 +54,13 @@ export default Plugin.define({
       return new Set([...unhealthyUntil].filter(([, until]) => until > now).map(([route]) => route))
     }
 
+    await ctx.model.transform((editor) => {
+      editor
+        .list()
+        .filter(isBlockedModel)
+        .forEach((model) => editor.remove(model.providerID as never, model.id as never))
+    })
+
     let known = await catalog()
 
     await ctx.session.hook("retry", (event) => {
@@ -66,11 +79,12 @@ export default Plugin.define({
     })
 
     await ctx.tool.hook("execute.before", async (event) => {
-      if (event.tool !== "subagent" || !isSubagentInput(event.input)) return
+      if (event.tool !== "subagent") return
       const input = event.input
+      if (!isSubagentInput(input)) return rejectUserOnly(input)
       known = await catalog()
       // Unpolicied agents keep their own model, so they never wait on a quota read.
-      if (!isPolicied(input.agent)) return
+      if (!isPolicied(input.agent)) return rejectUserOnly(input)
       exhausted = exhaustedRoutes(known, await quota.claude())
       const failing = unhealthy()
       const resolution = resolve(input.agent, known, { unhealthy: failing, exhausted })

@@ -1,7 +1,10 @@
 # opencode-v2-model-policy
 
 OpenCode 2 plugin that enforces which model a subagent runs on, per agent, with
-provider fallback.
+provider fallback. It also filters the model catalog and keeps Anthropic API
+models user-only.
+
+Absorbs the former heliowap/opencode-v2-model-routes.
 
 The parent session can pass any `model` to the `subagent` tool. For agents with a
 policy, an `execute.before` hook replaces it with the policy route, so a delegated
@@ -91,6 +94,38 @@ Timing and access:
   it again for 10 minutes. Quota reads in that window are unknown.
 - Agents without a policy never read quota.
 
+## Catalog filter and user-only Anthropic models
+
+OpenAI and Anthropic models stay in the model catalog only when they come from
+an approved provider. A `model.transform` hook removes every model that matches
+both conditions:
+
+- its provider is not one of `openai`, `cli_proxy`, `cli_proxy_openai` or
+  `opencode-go`;
+- its ID starts with `openai/` or `anthropic/` (optionally prefixed with `~`),
+  or its family starts with `gpt` or `claude`.
+
+Exception: `anthropic/claude-sonnet-5-5` and `anthropic/claude-haiku-5-5` stay
+available through the Anthropic API. Models from other vendors, and OpenAI or
+Anthropic models served by the approved providers, are left untouched. Models
+defined in your `opencode.jsonc` are not removed by a catalog transform; only
+models OpenCode supplies are. The provider list and patterns are defined in
+[`src/routes.ts`](src/routes.ts).
+
+Anthropic API models are user-only. An `execute.before` hook rejects a
+`subagent` call whose `model` starts with `anthropic/` (ignoring case and
+surrounding whitespace), so only the user selects them in `/models`. The check
+runs after the policy: an agent with a policy has its `model` replaced by the
+policy route first, so asking for an Anthropic API model is routed, not
+rejected. Any other agent, such as `general`, is rejected. A subagent
+dispatched without `model` is not blocked, even when it inherits an Anthropic
+API model from its session. Commands and agent defaults that name an Anthropic
+API model, and background subagents resumed after a server restart, are not
+enforced either.
+
+This plugin replaces model-routes: remove the model-routes entry from `plugins`
+when you install it.
+
 ## Coverage
 
 The plugin intercepts `subagent` via `execute.before`. These paths create child
@@ -105,9 +140,19 @@ right model.
 
 ## Install
 
+Add the plugin to `opencode.jsonc`:
+
+```jsonc
+{
+  "plugins": ["github:heliowap/opencode-plugins#main::path:plugins/model-policy"]
+}
+```
+
+Or clone the monorepo and link the source:
+
 ```sh
-git clone https://github.com/heliowap/opencode-v2-model-policy
-cd opencode-v2-model-policy
+git clone https://github.com/heliowap/opencode-plugins
+cd opencode-plugins/plugins/model-policy
 bun install
 ln -s "$PWD/src" ~/.config/opencode/plugins/model-policy
 ```
@@ -127,10 +172,10 @@ bun test ./host     # starts real `opencode serve` instances against fixture pro
 ```
 
 The host tests need the `opencode` binary on `PATH` (or `OPENCODE_BIN`). They
-were written against OpenCode 2.0.25 and pass on 2.1.4. Tests that load your
-global plugins or the `code-review` skill are skipped when those files are
-missing. The host harness clears `CLIPROXY_URL` and `CLIPROXY_MANAGEMENT_KEY`, so
-the tests never reach your real proxy.
+were written against OpenCode 2.0.25 and pass on 2.2.0. Tests that load the
+`code-review` skill are skipped when that file is missing. The host harness
+clears `CLIPROXY_URL` and `CLIPROXY_MANAGEMENT_KEY`, so the tests never reach
+your real proxy.
 
 ## License
 

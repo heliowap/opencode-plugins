@@ -1,7 +1,7 @@
 {
   "name": "opencode-v2-model-policy",
   "version": "0.1.0",
-  "description": "Enforces the model route of delegated subagent work in OpenCode",
+  "description": "Enforces the model route of delegated subagent work, filters the model catalog and keeps Anthropic API models user-only in OpenCode",
   "type": "module",
   "private": true,
   "exports": {
