@@ -182,3 +182,25 @@ test("a stryker.config.json whose mutate is not a string array exits 2", () => {
   expect(result.stdout).toEqual("")
   expect(result.stderr).toEqual("stryker.config.json: mutate must be an array of strings\n")
 })
+
+test("run from a package in a subdirectory of the repo, changed files are relative to that package", () => {
+  dir = mkdtempSync(join(tmpdir(), "verify-changed-"))
+  const repo = dir
+  git(repo, "init", "-q")
+  write(repo, "plugins/goal/stryker.config.json", JSON.stringify({ mutate: ["src/goal.ts"] }))
+  write(repo, "plugins/goal/src/goal.ts", "export const goal = 1\n")
+  write(repo, "README.md", "# repo\n")
+  git(repo, "add", "-A")
+  git(repo, "commit", "-q", "-m", "base")
+  const base = git(repo, "rev-parse", "HEAD")
+  write(repo, "plugins/goal/src/goal.ts", "export const goal = 2\n")
+  write(repo, "README.md", "# changed outside the package\n")
+  git(repo, "add", "-A")
+  git(repo, "commit", "-q", "-m", "change")
+
+  const result = verify(join(repo, "plugins/goal"), "--dry-run", "--base", base)
+
+  expect(result.exitCode).toEqual(0)
+  expect(result.stdout).toContain("changed files:\n  src/goal.ts\nselected commands:\n")
+  expect(result.stdout).not.toContain("README.md")
+})
