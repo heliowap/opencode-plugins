@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  OPENCODE_VERSION: 2.0.24
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      plugins: ${{ steps.matrix.outputs.plugins }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - id: matrix
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            bun scripts/ci-matrix.ts --all >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$EVENT" = pull_request ]; then
+            base="$PR_BASE"
+          else
+            base="$PUSH_BEFORE"
+          fi
+          if [ -z "$base" ] || [ "$base" = 0000000000000000000000000000000000000000 ]; then
+            bun scripts/ci-matrix.ts --all >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only "$base" "$GITHUB_SHA" | bun scripts/ci-matrix.ts >> "$GITHUB_OUTPUT"
+          fi
+
+  root:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-root-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test ./test
+
+  plugin:
+    name: plugin (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.plugins != '[]'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    defaults:
+      run:
+        working-directory: plugins/${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ matrix.bun }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ matrix.bun }}-${{ hashFiles(format('plugins/{0}/bun.lock', matrix.name)) }}
+      - if: matrix.opencode != ''
+        run: npm i -g @opencode/cli@${{ matrix.opencode }}
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - if: matrix.test != ''
+        run: ${{ matrix.test }}
+
+  goal-mutation:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.plugins), 'goal')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: plugins/goal
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('plugins/goal/bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run mutation
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-report
+          path: plugins/goal/reports/mutation
+          retention-days: 7
+
+  goal-host:
+    name: goal-host (${{ matrix.suite }})
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.plugins), 'goal')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [lifecycle, budget, controls, failure, persistence, package, status, headless, verify, trace, watchdog, loop, tui, tui-package]
+    defaults:
+      run:
+        working-directory: plugins/goal
+    env:
+      GOAL_HOST_KEEP: "1"
+      GOAL_PLUGIN_SPEC: ${{ (matrix.suite == 'package' || matrix.suite == 'tui-package') && format('github:{0}#{1}::path:plugins/goal', github.repository, github.event.pull_request.head.sha || github.sha) || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/.npm
+          key: host-${{ runner.os }}-${{ env.OPENCODE_VERSION }}-${{ hashFiles('plugins/goal/bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: npm install --global @opencode/cli@${{ env.OPENCODE_VERSION }}
+      - run: opencode --version
+      - if: startsWith(matrix.suite, 'tui')
+        run: sudo apt-get install -y tmux
+      - run: mkdir -p "$RUNNER_TEMP/hosts"
+      - run: bun test ./host/${{ matrix.suite == 'tui-package' && 'tui' || matrix.suite }}.test.ts
+        env:
+          TMPDIR: ${{ runner.temp }}/hosts
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: host-${{ matrix.suite }}
+          path: ${{ runner.temp }}/hosts
+          retention-days: 7
