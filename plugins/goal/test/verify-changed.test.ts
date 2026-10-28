@@ -37,14 +37,14 @@ function dryRun(repo: string, base: string) {
   return verify(repo, "--dry-run", "--base", base)
 }
 
-function throwawayRepo(files: Record<string, string> = {}): string {
+function throwawayRepo(files: Record<string, string> = {}, packageDir = ""): string {
   dir = mkdtempSync(join(tmpdir(), "verify-changed-"))
   const repo = dir
   git(repo, "init", "-q")
-  write(repo, "stryker.config.json", JSON.stringify({ mutate: ["src/goal.ts"] }))
-  write(repo, "src/goal.ts", "export const goal = 1\n")
+  write(repo, join(packageDir, "stryker.config.json"), JSON.stringify({ mutate: ["src/goal.ts"] }))
+  write(repo, join(packageDir, "src/goal.ts"), "export const goal = 1\n")
   write(repo, "README.md", "# repo\n")
-  for (const [path, text] of Object.entries(files)) write(repo, path, text)
+  for (const [path, text] of Object.entries(files)) write(repo, join(packageDir, path), text)
   git(repo, "add", "-A")
   git(repo, "commit", "-q", "-m", "base")
   return repo
@@ -184,14 +184,7 @@ test("a stryker.config.json whose mutate is not a string array exits 2", () => {
 })
 
 test("run from a package in a subdirectory of the repo, changed files are relative to that package", () => {
-  dir = mkdtempSync(join(tmpdir(), "verify-changed-"))
-  const repo = dir
-  git(repo, "init", "-q")
-  write(repo, "plugins/goal/stryker.config.json", JSON.stringify({ mutate: ["src/goal.ts"] }))
-  write(repo, "plugins/goal/src/goal.ts", "export const goal = 1\n")
-  write(repo, "README.md", "# repo\n")
-  git(repo, "add", "-A")
-  git(repo, "commit", "-q", "-m", "base")
+  const repo = throwawayRepo({}, "plugins/goal")
   const base = git(repo, "rev-parse", "HEAD")
   write(repo, "plugins/goal/src/goal.ts", "export const goal = 2\n")
   write(repo, "README.md", "# changed outside the package\n")
@@ -201,6 +194,15 @@ test("run from a package in a subdirectory of the repo, changed files are relati
   const result = verify(join(repo, "plugins/goal"), "--dry-run", "--base", base)
 
   expect(result.exitCode).toEqual(0)
-  expect(result.stdout).toContain("changed files:\n  src/goal.ts\nselected commands:\n")
-  expect(result.stdout).not.toContain("README.md")
+  expect(result.stdout).toEqual(
+    [
+      "changed files:",
+      "  src/goal.ts",
+      "selected commands:",
+      "  bun run typecheck",
+      "  bun test --coverage",
+      "  bun run mutation",
+      "",
+    ].join("\n"),
+  )
 })
