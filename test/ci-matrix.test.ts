@@ -1,22 +1,22 @@
 import { describe, expect, test } from "bun:test"
-import { readdirSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { listPlugins } from "../install.ts"
 import { OVERRIDES } from "../scripts/ci-matrix.ts"
 
 const root = join(import.meta.dir, "..")
 const script = join(root, "scripts/ci-matrix.ts")
-const dirs = readdirSync(join(root, "plugins"), { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => entry.name)
-  .sort()
+const dirs = (await listPlugins()).map((plugin) => plugin.name)
 
 type Row = { name: string; runner: string; bun: string; opencode: string; test: string }
 
-async function run(args: string[], stdin = "") {
+async function run(args: string[], stdin = "", env: Record<string, string> = {}) {
   const proc = Bun.spawn(["bun", script, ...args], {
     stdin: new Response(stdin),
     stdout: "pipe",
     stderr: "pipe",
+    env: { ...process.env, ...env },
   })
   const out = await new Response(proc.stdout).text()
   const code = await proc.exited
@@ -35,6 +35,23 @@ async function run(args: string[], stdin = "") {
 }
 
 describe("ci-matrix", () => {
+  test("discovers sorted plugins including known ones", () => {
+    expect(dirs).toEqual([...dirs].sort())
+    for (const known of ["goal", "redact-secrets"]) expect(dirs).toContain(known)
+  })
+
+  test("never writes to GITHUB_OUTPUT itself", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "ci-matrix-"))
+    const out = join(tmp, "output")
+    try {
+      const r = await run(["--all"], "", { GITHUB_OUTPUT: out })
+      expect(r.code).toBe(0)
+      expect(existsSync(out)).toBe(false)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
   test("plugins/<n>/... selects plugin n only", async () => {
     const r = await run([], "plugins/goal/src/index.ts\nplugins/goal/README.md\nplugins/tps-meter/package.json\n")
     expect(r.code).toBe(0)
