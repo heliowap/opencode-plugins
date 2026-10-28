@@ -18,6 +18,7 @@ export interface HostOptions {
   readonly pluginDir?: string
   readonly omit?: readonly string[]
   readonly extraPlugins?: readonly string[]
+  readonly catalog?: Readonly<Record<string, Readonly<Record<string, string | undefined>>>>
   readonly configFiles?: Readonly<Record<string, string>>
   readonly projectFiles?: Readonly<Record<string, string>>
   readonly env?: Record<string, string>
@@ -39,12 +40,20 @@ const freePort = () => {
   return port
 }
 
-const provider = (fixture: Fixture, id: string, models: Record<string, readonly object[]>) => ({
+const provider = (
+  fixture: Fixture,
+  id: string,
+  models: Record<string, readonly object[]>,
+  families: Readonly<Record<string, string | undefined>> = {},
+) => ({
   name: id,
   package: "@opencode/ai/providers/openai-compatible",
   settings: { baseURL: fixture.baseURL(id), apiKey: "fixture" },
   models: Object.fromEntries(
-    Object.entries(models).map(([model, variants]) => [model, { name: model, capabilities: { tools: true }, variants }]),
+    Object.entries(models).map(([model, variants]) => [
+      model,
+      { name: model, capabilities: { tools: true }, variants, ...(families[model] && { family: families[model] }) },
+    ]),
   ),
 })
 
@@ -77,6 +86,12 @@ export class Host {
         providers: {
           fixture: provider(fixture, "fixture", { test: [] }),
           ...Object.fromEntries(routes.map(([id, models]) => [id, provider(fixture, id, models)])),
+          ...Object.fromEntries(
+            Object.entries(options.catalog ?? {}).map(([id, models]) => [
+              id,
+              provider(fixture, id, Object.fromEntries(Object.keys(models).map((model) => [model, []])), models),
+            ]),
+          ),
         },
         agents: {
           researcher: { mode: "subagent", description: "Fixture researcher", model: "fixture/test" },
