@@ -1,4 +1,6 @@
-# opencode-v2-tps-meter
+# tps-meter
+
+Formerly `heliowap/opencode-v2-tps-meter`.
 
 OpenCode 2 CLI plugin that shows a tokens-per-second meter in the prompt footer.
 
@@ -13,7 +15,7 @@ Add the package to `plugins` in `~/.config/opencode/opencode.jsonc`:
 
 ```jsonc
 {
-  "plugins": ["github:heliowap/opencode-v2-tps-meter"]
+  "plugins": ["github:heliowap/opencode-plugins#main::path:plugins/tps-meter"]
 }
 ```
 

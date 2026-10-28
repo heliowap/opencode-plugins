@@ -1,4 +1,6 @@
-# opencode-v2-redact-secrets
+# redact-secrets
+
+Formerly `heliowap/opencode-v2-redact-secrets`.
 
 An OpenCode plugin that masks credentials in tool results before the model sees
 them or the session stores them.
@@ -35,7 +37,7 @@ Add the plugin to `opencode.jsonc`:
 
 ```jsonc
 {
-  "plugins": ["github:heliowap/opencode-v2-redact-secrets"]
+  "plugins": ["github:heliowap/opencode-plugins#main::path:plugins/redact-secrets"]
 }
 ```
 
