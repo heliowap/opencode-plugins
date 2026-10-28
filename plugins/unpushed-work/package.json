@@ -1,0 +1,21 @@
+{
+  "name": "unpushed-work",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "After each successful OpenCode turn, reports uncommitted and unpushed work across local repositories.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test && python3 -m unittest discover -s test -p 'test_*.py'"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.0.24"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@typescript/native-preview": "^7.0.0-dev"
+  }
+}

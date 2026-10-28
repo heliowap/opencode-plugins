@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Report work that exists only on this machine. Read-only; never fetches.
+
+One line per problem, nothing for clean repositories:
+  - uncommitted or untracked paths in any worktree,
+  - a detached HEAD holding commits on no branch or remote,
+  - local branches with no upstream (or a deleted one) holding commits on no remote,
+  - branches ahead of their upstream,
+  - repositories git cannot read ("cannot inspect").
+Repositories are found under ROOTS (relative to $HOME), plus every worktree
+`git worktree list` knows for them. Remote state comes from local
+remote-tracking refs as of the last fetch.
+
+--since TIME also reports how many files under ~/.local/share/opencode/evidence
+changed after TIME (ISO 8601); that line never fails the run.
+
+Exit 1 when any repository problem is found, otherwise 0.
+
+Usage: unpushed-work [--since 2026-10-15T09:00:00Z]
+"""
+import argparse
+import datetime as dt
+import os
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+HOME = Path.home()
+ROOTS = ("VSCode/*", "VSCode/worktrees/*", ".codex/worktrees/*", ".codex/worktrees/*/*")
+EVIDENCE = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share")) / "opencode/evidence"
+
+
+def git(path: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "--no-optional-locks", "-C", str(path), *args],
+        capture_output=True, text=True, check=True,
+    ).stdout
+
+
+def repositories() -> tuple[dict[Path, list[Path]], list[str]]:
+    """Each repository's main worktree mapped to its existing, non-bare worktrees; plus unreadable candidates."""
+    repos: dict[Path, list[Path]] = {}
+    broken: list[str] = []
+    for candidate in sorted({p for root in ROOTS for p in HOME.glob(root) if (p / ".git").exists()}):
+        try:
+            listing = git(candidate, "worktree", "list", "--porcelain")
+        except subprocess.CalledProcessError as error:
+            broken.append(cannot_inspect(candidate, error))
+            continue
+        entries = [worktree_entry(block) for block in listing.strip().split("\n\n")]
+        primary = Path(entries[0]["worktree"])
+        if primary not in repos:
+            repos[primary] = [Path(e["worktree"]) for e in entries
+                              if "bare" not in e and Path(e["worktree"]).is_dir()]
+    return repos, broken
+
+
+def worktree_entry(block: str) -> dict[str, str]:
+    """One `git worktree list --porcelain` block as {attribute: value}; flag attributes map to ""."""
+    return {key: value for key, _, value in (line.partition(" ") for line in block.splitlines())}
+
+
+def cannot_inspect(path: Path, error: subprocess.CalledProcessError) -> str:
+    reason = (error.stderr or "").strip().splitlines()
+    return f"{path}: cannot inspect: {reason[0] if reason else error}"
+
+
+def worktree_problems(path: Path) -> list[str]:
+    problems = []
+    lines = git(path, "status", "--porcelain=v2", "--branch").splitlines()
+    branch = next(line.split(" ", 2)[2] for line in lines if line.startswith("# branch.head "))
+    changed = [line for line in lines if not line.startswith("#")]
+    if changed:
+        problems.append(f"{path}: {len(changed)} uncommitted path(s) on {branch}")
+    if branch == "(detached)":
+        count = int(git(path, "rev-list", "--count", "HEAD", "--not", "--branches", "--remotes"))
+        if count:
+            problems.append(f"{path}: detached HEAD has {count} commit(s) on no branch or remote")
+    return problems
+
+
+def unpushed_branches(path: Path) -> list[str]:
+    problems = []
+    on_no_remote = set(git(path, "rev-list", "--branches", "--not", "--remotes").split())
+    refs = git(path, "for-each-ref", "refs/heads",
+               "--format=%(refname:short)\t%(objectname)\t%(upstream:short)\t%(upstream:track,nobracket)")
+    for line in refs.splitlines():
+        branch, tip, upstream, track = line.split("\t")
+        if not upstream or track == "gone":
+            if tip in on_no_remote:
+                count = git(path, "rev-list", "--count", branch, "--not", "--remotes").strip()
+                problems.append(f"{path}: branch {branch} has no upstream; {count} commit(s) on no remote")
+            continue
+        ahead = next((int(part.split()[1]) for part in track.split(", ") if part.startswith("ahead ")), 0)
+        if ahead:
+            problems.append(f"{path}: branch {branch} is {ahead} commit(s) ahead of {upstream}")
+    return problems
+
+
+def run_check(check, path: Path) -> list[str]:
+    try:
+        return check(path)
+    except subprocess.CalledProcessError as error:
+        return [cannot_inspect(path, error)]
+
+
+def evidence_changed(since: str) -> list[str]:
+    cutoff = dt.datetime.fromisoformat(since).timestamp()
+    changed = [f for f in EVIDENCE.rglob("*") if f.is_file() and f.stat().st_mtime > cutoff]
+    return [f"evidence: {len(changed)} file(s) changed since {since} in {EVIDENCE} (not in git)"] if changed else []
+
+
+def iso_time(value: str) -> str:
+    dt.datetime.fromisoformat(value)
+    return value
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--since", type=iso_time, help="also report evidence files changed after this ISO 8601 time")
+    args = parser.parse_args()
+
+    repos, problems = repositories()
+    checks = [(worktree_problems, w) for worktrees in repos.values() for w in worktrees]
+    checks += [(unpushed_branches, primary) for primary in repos]
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
+        problems += [line for lines in pool.map(lambda c: run_check(*c), checks) for line in lines]
+    notes = evidence_changed(args.since) if args.since else []
+
+    for line in problems + notes:
+        print(line)
+    return 1 if problems else 0
+
+
+sys.exit(main())
