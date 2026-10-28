@@ -10,7 +10,7 @@ function fail(message: string): never {
 }
 
 let dryRun = false
-let base = "origin/master"
+let base = "origin/main"
 const args = process.argv.slice(2)
 for (let i = 0; i < args.length; i++) {
   const arg = args[i]
@@ -33,8 +33,8 @@ const lines = (output: string) => output.split("\n").filter(Boolean)
 
 const changed = [
   ...new Set([
-    ...lines(git(["diff", "--name-only", `${base}...HEAD`])),
-    ...lines(git(["diff", "--name-only", "HEAD"])),
+    ...lines(git(["diff", "--name-only", "--relative", `${base}...HEAD`])),
+    ...lines(git(["diff", "--name-only", "--relative", "HEAD"])),
     ...lines(git(["ls-files", "--others", "--exclude-standard"])),
   ]),
 ].sort()
