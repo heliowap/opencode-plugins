@@ -1,0 +1,39 @@
+{
+  "name": "opencode-v2-goal-plugin",
+  "version": "0.1.0",
+  "description": "Codex-style /goal for OpenCode: a persistent, audited objective that keeps a session working across turns",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./tui": "./src/tui.tsx",
+    "./rpc": "./src/rpc.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsgo --noEmit",
+    "mutation": "stryker run",
+    "report": "bun scripts/report.ts",
+    "verify:changed": "bun scripts/verify-changed.ts"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.0.24",
+    "@opencode/schema": "2.0.24",
+    "effect": "4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "@opencode/theme": "2.0.24",
+    "@opentui/core": "0.5.14",
+    "@opentui/solid": "0.5.14",
+    "@stryker-mutator/core": "^10.0.0",
+    "@types/bun": "latest",
+    "@typescript/native-preview": "^7.0.0-dev",
+    "solid-js": "1.9.15"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@opentui/core": ">=0.5.14",
+    "@opentui/solid": ">=0.5.14",
+    "solid-js": ">=1.9.0"
+  }
+}
