@@ -44,7 +44,7 @@ Every claim here comes from a real `opencode serve` process with no mocked plugi
 | H2 | `opencode run --standalone` stops the goal after its first turn | ⚠️ known limitation | stored `active`, no `a.txt`/`b.txt`, fewer than 8 model requests. The command returns after its first turn and its private server exits with it |
 | V1 | `--verify` refuses completion until the command exits 0 in the goal's directory | ✅ | first tool result names exit code 3 and the output, stored `complete` with `verifyFailures: 1`, `lastExitCode: 0` |
 | V2 | Interrupting a running check kills the command and pauses the goal | ✅ | `late.txt` never written, stored `paused`, no failed check counted |
-| A14 | The plugin installed from its package spec works | ✅ | stored `complete`. CI installs `github:heliowap/opencode-plugins#<commit under test>::path:plugins/goal` |
+| A14 | The plugin installed from its package spec works | ✅ | stored `complete`. CI installs `github:<repo>#<commit under test>::path:plugins/goal` |
 | A15 | `goal.get` RPC returns the stored goal and `goal.changed` fires on each transition | ✅ | RPC output equals the `kv` row, events read from `/api/event` |
 | A17 | A bare `/goal edit` sends the full objective to the terminal through `goal.editRequested`, and `apply Edit` saves the new one | ✅ | event payload read from `/api/event`, stored new objective with status kept, refusal notice without a goal |
 | R1 | `goal.apply` with `Pause` pauses an active goal | ✅ | real opencode serve, stored goal |

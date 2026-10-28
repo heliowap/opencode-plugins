@@ -48,7 +48,7 @@ Keep a comment only for a non-obvious why, such as a host quirk. State the obser
 
 ## Host canaries
 
-Changes to `src/index.ts` or event handling need a host canary in `host/`. A canary starts a real `opencode serve` through `host/harness/host.ts` with a scripted fixture provider (`host/harness/fixture.ts`). Grade it on `host.stored(session)`, files on disk, and `host.fixture.agentRequests()`. Assert exact counts and values. A bug fix lands with a canary or unit test that fails before the fix. Add new canary files to the CI matrix in `.github/workflows/ci.yml`.
+Changes to `src/index.ts` or event handling need a host canary in `host/`. A canary starts a real `opencode serve` through `host/harness/host.ts` with a scripted fixture provider (`host/harness/fixture.ts`). Grade it on `host.stored(session)`, files on disk, and `host.fixture.agentRequests()`. Assert exact counts and values. A bug fix lands with a canary or unit test that fails before the fix. Add new canary files to the `goal-host` matrix in the repo root `.github/workflows/ci.yml`.
 
 ## Manual end-to-end checks
 
