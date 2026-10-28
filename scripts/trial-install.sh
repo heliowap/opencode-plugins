@@ -99,7 +99,8 @@ while :; do
 import json, sys
 want = sys.argv[1:]
 data = json.load(sys.stdin)["data"]
-state = {p["id"]: p["state"]["status"] for p in data}
+# Plugin ids differ from directory names (tps.meter.server, local.unpushed-work), so match on the installed spec.
+state = {p.get("source", {}).get("target", "").rsplit("::path:plugins/", 1)[-1]: p["state"]["status"] for p in data}
 sys.exit(0 if all(state.get(w) == "active" for w in want) else 1)
 ' "${names[@]}"; then
     break
@@ -114,7 +115,7 @@ done
 for name in "${names[@]}"; do
   echo "plugin list entry: $(printf '%s' "$body" | python3 -c '
 import json, sys
-print(json.dumps(next(p for p in json.load(sys.stdin)["data"] if p["id"] == sys.argv[1])))
+print(json.dumps(next(p for p in json.load(sys.stdin)["data"] if p.get("source", {}).get("target", "").endswith("::path:plugins/" + sys.argv[1]))))
 ' "$name")"
 done
 
