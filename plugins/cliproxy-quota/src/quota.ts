@@ -1,0 +1,517 @@
+export type WindowKind = "5h" | "day" | "week" | "month" | "fable"
+
+export type Window = {
+  readonly kind: WindowKind
+  readonly usedPercent: number
+  readonly resetAt: number | undefined
+}
+
+export type ApiCall = {
+  readonly auth_index: string
+  readonly method: "GET" | "POST"
+  readonly url: string
+  readonly header: Readonly<Record<string, string>>
+  readonly data?: string
+}
+
+export type Account = {
+  readonly provider: string
+  readonly label: string
+  readonly authIndex: string | undefined
+  readonly observedAt: number | undefined
+  readonly windows: readonly Window[]
+}
+
+export type QuotaResult = { readonly ok: true; readonly accounts: Account[] } | { readonly ok: false; readonly error: string }
+
+// A native source reads quota straight from the provider through an OpenCode integration, without CLIProxyAPI.
+// Its NATIVE_SOURCES record key is the integration ID, so the key never diverges from a field on the entry.
+export type NativeSource = {
+  readonly provider: string
+  readonly name: string
+  readonly method: "oauth" | "key"
+  readonly plan: (credential: NativeCredential) => NativePlan
+  readonly parse: (body: unknown) => Window[]
+}
+
+export type NativeCredential = {
+  readonly type?: string
+  readonly methodID?: string
+  readonly access?: string
+  readonly key?: string
+  readonly metadata?: Readonly<Record<string, unknown>>
+}
+
+export type NativePlan = { readonly kind: "call"; readonly token: string; readonly call: Omit<ApiCall, "auth_index"> } | { readonly kind: "hint"; readonly message: string } | undefined
+
+export type NativeID = keyof typeof NATIVE_SOURCES
+
+export type QuotaSource = "proxy" | NativeID
+
+type Signals = Readonly<Record<string, string>>
+
+const KIND_ORDER: readonly WindowKind[] = ["5h", "day", "week", "month", "fable"]
+
+const KIND_LABEL: Record<WindowKind, string> = { "5h": "5h", day: "day", week: "wk", month: "mo", fable: "fable" }
+
+// CLIProxyAPI records passive quota signals only for these providers; each reports its windows differently.
+const READERS: Record<string, (signals: Signals, base: number) => Window[]> = {
+  codex: readCodex,
+  claude: (signals) =>
+    [
+      toWindow("5h", fraction(signals["Anthropic-Ratelimit-Unified-5h-Utilization"]), unixSeconds(signals["Anthropic-Ratelimit-Unified-5h-Reset"])),
+      toWindow("week", fraction(signals["Anthropic-Ratelimit-Unified-7d-Utilization"]), unixSeconds(signals["Anthropic-Ratelimit-Unified-7d-Reset"])),
+    ].filter((item) => item !== undefined),
+  devin: (signals) =>
+    [
+      toWindow("day", remaining(signals.daily_quota_remaining_percent), isoTime(signals.daily_quota_reset_at)),
+      toWindow("week", remaining(signals.weekly_quota_remaining_percent), isoTime(signals.weekly_quota_reset_at)),
+    ].filter((item) => item !== undefined),
+}
+
+// The plugin asks upstream through the proxy's api-call with the same requests as the CLIProxyAPI Management Center.
+// CLIProxyAPI records no quota for Devin and Antigravity, its Codex and Claude signals go stale after a reset, and it
+// never records the Claude Fable window.
+const PROBES: Record<
+  string,
+  {
+    readonly call: (file: Record<string, unknown>) => Omit<ApiCall, "auth_index"> | undefined
+    readonly parse: (body: unknown) => { provider: string; windows: Window[] }[]
+  }
+> = {
+  codex: {
+    call: (file) => {
+      const token = isRecord(file.id_token) ? file.id_token : {}
+      const account = text(token.chatgpt_account_id) || text(file.chatgpt_account_id)
+      return codexUsageCall(account)
+    },
+    parse: (body) => {
+      const limit = isRecord(body) && isRecord(body.rate_limit) ? body.rate_limit : {}
+      const windows = [limit.primary_window, limit.secondary_window].flatMap((item, index): Window[] => {
+        if (!isRecord(item)) return []
+        const used = number(scalar(item.used_percent))
+        if (used === undefined) return []
+        const seconds = number(scalar(item.limit_window_seconds))
+        return [{ kind: codexKind(seconds === undefined ? undefined : seconds / 60, index), usedPercent: used, resetAt: unixSeconds(scalar(item.reset_at)) }]
+      })
+      return windows.length === 0 ? [] : [{ provider: "codex", windows }]
+    },
+  },
+  claude: {
+    call: () => ({
+      method: "GET",
+      url: "https://api.anthropic.com/api/oauth/usage",
+      header: {
+        "User-Agent": "claude-cli/2.1.280 (external, cli)",
+        Authorization: "Bearer $TOKEN$",
+        "Content-Type": "application/json",
+        "anthropic-beta": "oauth-2025-04-20",
+      },
+    }),
+    parse: (body) => {
+      if (!isRecord(body)) return []
+      const windows = [
+        readClaudeUsage("5h", body.five_hour),
+        readClaudeUsage("week", body.seven_day),
+        readClaudeFable(body) ?? readClaudeUsage("fable", body.iguana_necktie),
+      ].filter((item) => item !== undefined)
+      return windows.length === 0 ? [] : [{ provider: "claude", windows }]
+    },
+  },
+  devin: {
+    call: () => ({
+      method: "POST",
+      url: "https://server.codeium.com/exa.seat_management_pb.SeatManagementService/GetUserStatus",
+      header: { "Content-Type": "application/json", "Connect-Protocol-Version": "1" },
+      data: JSON.stringify({
+        metadata: {
+          ideName: "chisel",
+          ideVersion: "3000.10.21",
+          apiKey: "$TOKEN$",
+          locale: "en",
+          os: "darwin",
+          extensionVersion: "3000.10.21",
+          clientName: "chisel",
+        },
+      }),
+    }),
+    parse: (body) => {
+      const windows = readDevinStatus(body)
+      return windows.length === 0 ? [] : [{ provider: "devin", windows }]
+    },
+  },
+  antigravity: {
+    call: (file) => {
+      const project = text(file.project_id)
+      if (!project) return undefined
+      return {
+        method: "POST",
+        url: "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+        header: {
+          Authorization: "Bearer $TOKEN$",
+          "Content-Type": "application/json",
+          "User-Agent": "antigravity/cli/1.0.13 (aidev_client; os_type=darwin; arch=arm64)",
+        },
+        data: JSON.stringify({ project }),
+      }
+    },
+    parse: (body) => {
+      if (!isRecord(body) || !Array.isArray(body.groups)) return []
+      return body.groups.flatMap((group) => {
+        if (!isRecord(group) || !Array.isArray(group.buckets)) return []
+        const windows = group.buckets.flatMap(readAntigravityBucket)
+        if (windows.length === 0) return []
+        const gemini = group.buckets.some((bucket) => isRecord(bucket) && text(bucket.bucketId)?.startsWith("gemini-"))
+        return [{ provider: gemini ? "antigravity" : "antigravity-3p", windows }]
+      })
+    },
+  },
+}
+
+const MODEL_PROVIDERS: readonly (readonly [RegExp, string])[] = [
+  [/^(ag-claude-|ag-gpt-oss|gpt-oss)/, "antigravity-3p"],
+  [/^(ag-|gemini-)/, "antigravity"],
+  [/^(codex-|gpt-|o\d)/, "codex"],
+  [/^claude-/, "claude"],
+  [/^(devin-|swe-)/, "devin"],
+]
+
+export function parseCredentials(body: unknown, now: number): Account[] {
+  if (!isRecord(body) || !Array.isArray(body.files)) return []
+  return body.files.flatMap((file) => {
+    if (!isRecord(file) || file.disabled === true) return []
+    const provider = text(file.provider)?.toLowerCase() ?? ""
+    const reader = READERS[provider]
+    const quota = isRecord(file.quota) ? file.quota : undefined
+    if (!reader || !quota || !isRecord(quota.signals)) return []
+    const observedAt = isoTime(quota.observed_at)
+    const windows = reader(stringSignals(quota.signals), observedAt ?? now).map((item) => renew(item, now))
+    if (windows.length === 0) return []
+    return [{ provider, label: text(file.label) || text(file.name) || provider, authIndex: text(file.auth_index), observedAt, windows }]
+  })
+}
+
+// A live probe decides which windows a credential has. The proxy's recorded signals keep updating with every request it
+// serves, so a window takes the recorded value when it was observed after the probe. Fable has no recorded signal.
+export function mergeAccounts(recorded: readonly Account[], live: readonly Account[], now: number): Account[] {
+  const merged = live.map((account) => {
+    const other = recorded.find((item) => item.authIndex === account.authIndex && item.provider === account.provider)
+    const fresher = other && (other.observedAt ?? 0) > (account.observedAt ?? 0) ? other : undefined
+    return {
+      ...account,
+      observedAt: (fresher ?? account).observedAt,
+      windows: account.windows.map((window) => renew(fresher?.windows.find((item) => item.kind === window.kind) ?? window, now)),
+    }
+  })
+  return [...recorded.filter((item) => !live.some((account) => account.authIndex === item.authIndex)), ...merged]
+}
+
+export function probeTargets(body: unknown) {
+  if (!isRecord(body) || !Array.isArray(body.files)) return []
+  return body.files.flatMap((file) => {
+    if (!isRecord(file) || file.disabled === true) return []
+    const provider = text(file.provider)?.toLowerCase() ?? ""
+    const authIndex = text(file.auth_index)
+    const call = PROBES[provider]?.call(file)
+    if (!authIndex || !call) return []
+    return [{ provider, label: text(file.label) || text(file.name) || provider, authIndex, call: { auth_index: authIndex, ...call } }]
+  })
+}
+
+export function parseProbe(provider: string, body: unknown) {
+  return PROBES[provider]?.parse(body) ?? []
+}
+
+export function codexUsageCall(account?: string): Omit<ApiCall, "auth_index"> {
+  return {
+    method: "GET",
+    url: "https://chatgpt.com/backend-api/wham/usage",
+    header: {
+      Authorization: "Bearer $TOKEN$",
+      "Content-Type": "application/json",
+      "User-Agent": "codex-tui/0.149.1 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.149.1)",
+      ...(account ? { "Chatgpt-Account-Id": account } : {}),
+    },
+  }
+}
+
+// The $TOKEN$ placeholder exists only for calls routed through the proxy's api-call; native calls carry a real Bearer.
+export function goUsageCall(): Omit<ApiCall, "auth_index"> {
+  return { method: "GET", url: "https://opencode.ai/zen/go/v1/usage", header: {} }
+}
+
+export const NATIVE_SOURCES = {
+  openai: {
+    provider: "codex",
+    name: "OpenAI",
+    method: "oauth",
+    plan: (credential) => {
+      if (credential.type !== "oauth") return undefined
+      // SIWC grants target the public API, not Codex's backend; OpenAI documents usage settings instead of a quota API.
+      if (credential.methodID === "chatgpt-token-sharing")
+        return { kind: "hint", message: "Manage ChatGPT token sharing usage at https://chatgpt.com/settings/usage" }
+      if (!credential.access || !["chatgpt-browser", "chatgpt-headless"].includes(credential.methodID ?? "")) return undefined
+      const account = credential.metadata?.accountID
+      return { kind: "call", token: credential.access, call: codexUsageCall(typeof account === "string" ? account : undefined) }
+    },
+    parse: (body) => parseProbe("codex", body).flatMap((result) => result.windows),
+  },
+  "opencode-go": {
+    provider: "opencode-go",
+    name: "OpenCode Go",
+    method: "key",
+    plan: (credential) => {
+      const key = credential.type === "key" ? text(credential.key) : undefined
+      if (!key) return undefined
+      return { kind: "call", token: key, call: goUsageCall() }
+    },
+    parse: readGoUsage,
+  },
+} satisfies Record<string, NativeSource>
+
+export function nativeSource(integrationID: string): NativeID | undefined {
+  return Object.hasOwn(NATIVE_SOURCES, integrationID) ? (integrationID as NativeID) : undefined
+}
+
+export function nativeError(message: string): Record<NativeID, QuotaResult> {
+  return Object.fromEntries(Object.keys(NATIVE_SOURCES).map((id) => [id, { ok: false as const, error: message }])) as Record<NativeID, QuotaResult>
+}
+
+export function providerForModel(modelID: string) {
+  const id = modelID.toLowerCase().replace(/^cpa-/, "")
+  const prefix = id.split("/")[0]
+  if (id.includes("/") && prefix && prefix in READERS) return prefix
+  return MODEL_PROVIDERS.find((entry) => entry[0].test(id))?.[1]
+}
+
+export function isProxyProvider(
+  provider: { readonly id: string; readonly settings?: Readonly<Record<string, unknown>> },
+  proxyURL: string,
+  explicit: readonly string[],
+) {
+  if (explicit.includes(provider.id)) return true
+  const baseURL = provider.settings?.baseURL
+  if (typeof baseURL !== "string" || !URL.canParse(baseURL) || !URL.canParse(proxyURL)) return false
+  const target = new URL(baseURL)
+  const proxy = new URL(proxyURL)
+  return target.port === proxy.port && loopback(target.hostname) === loopback(proxy.hostname)
+}
+
+export function quotaSource(
+  provider: { readonly id: string; readonly settings?: Readonly<Record<string, unknown>> },
+  settings: { readonly baseURL: string; readonly providers: readonly string[] },
+): QuotaSource | undefined {
+  if (isProxyProvider(provider, settings.baseURL, settings.providers)) return "proxy"
+  return nativeSource(provider.id)
+}
+
+// A native source stays silent until its first result lands, so the sidebar does not flash an empty Quota
+// section on every refresh tick before the fetch answers.
+export function quotaView(
+  source: QuotaSource | undefined,
+  modelID: string | undefined,
+  proxy: { readonly accounts: readonly Account[]; readonly error: string | undefined },
+  native: Readonly<Partial<Record<NativeID, QuotaResult>>>,
+): { provider: string | undefined; accounts: readonly Account[]; windows: readonly Window[]; error: string | undefined } {
+  if (source === undefined) return { provider: undefined, accounts: [], windows: [], error: proxy.error }
+  if (source === "proxy") {
+    const provider = modelID ? providerForModel(modelID) : undefined
+    return {
+      provider,
+      accounts: provider ? proxy.accounts.filter((account) => account.provider === provider) : [],
+      windows: modelID ? windowsForModel(proxy.accounts, modelID) : [],
+      error: proxy.error,
+    }
+  }
+  const result = native[source]
+  const provider = NATIVE_SOURCES[source].provider
+  const accounts = result?.ok ? result.accounts : []
+  const error = result && !result.ok ? result.error : undefined
+  const live = accounts.length > 0 || error !== undefined
+  return { provider: live ? provider : undefined, accounts, windows: live ? summarize(accounts, provider) : [], error }
+}
+
+export function summarize(accounts: readonly Account[], provider: string) {
+  const windows = accounts.filter((account) => account.provider === provider).flatMap((account) => account.windows)
+  return KIND_ORDER.flatMap((kind) => {
+    const best = windows
+      .filter((item) => item.kind === kind)
+      .reduce<Window | undefined>((min, item) => (min && min.usedPercent <= item.usedPercent ? min : item), undefined)
+    return best ? [best] : []
+  })
+}
+
+export function windowsForModel(accounts: readonly Account[], modelID: string) {
+  const provider = providerForModel(modelID)
+  if (!provider) return []
+  const fable = modelID.toLowerCase().includes("fable")
+  return summarize(accounts, provider).filter((item) => fable || item.kind !== "fable")
+}
+
+export function footerText(windows: readonly Window[]) {
+  const parts = KIND_ORDER.flatMap((kind) => windows.filter((item) => item.kind === kind)).map(
+    (item) => `${KIND_LABEL[item.kind]} ${Math.round(100 - item.usedPercent)}%`,
+  )
+  return parts.length === 0 ? "" : `${parts.join(" · ")} left`
+}
+
+export function formatReset(resetAt: number | undefined, now: number) {
+  if (resetAt === undefined) return ""
+  const minutes = Math.floor((resetAt - now) / 60_000)
+  if (resetAt <= now) return "reset due"
+  if (minutes < 1) return "in <1m"
+  if (minutes < 60) return `in ${minutes}m`
+  if (minutes < 24 * 60) return `in ${Math.floor(minutes / 60)}h ${minutes % 60}m`
+  return `in ${Math.floor(minutes / 1440)}d ${Math.floor((minutes % 1440) / 60)}h`
+}
+
+export function level(usedPercent: number) {
+  if (usedPercent >= 95) return "error"
+  if (usedPercent >= 80) return "warning"
+  return "ok"
+}
+
+export function bar(usedPercent: number) {
+  const filled = Math.min(10, Math.max(0, Math.round(usedPercent / 10)))
+  return "█".repeat(filled) + "░".repeat(10 - filled)
+}
+
+function renew(window: Window, now: number): Window {
+  return window.resetAt !== undefined && window.resetAt <= now ? { kind: window.kind, usedPercent: 0, resetAt: undefined } : window
+}
+
+const GO_WINDOWS: Readonly<Record<string, WindowKind>> = { rolling: "5h", weekly: "week", monthly: "month" }
+
+// The route is undocumented; the historical subscription code computed `percent` as consumed usage and set it to
+// 100 once rate-limited, so a limited window without a number is treated as saturated. Other windows drop.
+function readGoUsage(body: unknown): Window[] {
+  const usage = isRecord(body) && isRecord(body.usage) ? body.usage : undefined
+  if (!usage) return []
+  return Object.entries(GO_WINDOWS).flatMap(([name, kind]) => {
+    const window = usage[name]
+    if (!isRecord(window)) return []
+    const usedPercent = number(scalar(window.percent)) ?? (window.status === "rate-limited" ? 100 : undefined)
+    if (usedPercent === undefined) return []
+    return [{ kind, usedPercent, resetAt: isoTime(window.resetsAt) }]
+  })
+}
+
+function readDevinStatus(body: unknown): Window[] {
+  const status = isRecord(body) && isRecord(body.userStatus) ? body.userStatus.planStatus : undefined
+  if (!isRecord(status)) return []
+  return (
+    [
+      ["day", status.dailyQuotaRemainingPercent, status.dailyQuotaResetAtUnix],
+      ["week", status.weeklyQuotaRemainingPercent, status.weeklyQuotaResetAtUnix],
+    ] as const
+  ).flatMap((entry) => {
+    const resetAt = unixSeconds(scalar(entry[2]))
+    // Protobuf JSON omits zero values, so a window with a reset time but no percent has none left.
+    const remainingPercent = number(scalar(entry[1])) ?? (resetAt === undefined ? undefined : 0)
+    if (remainingPercent === undefined) return []
+    return [{ kind: entry[0], usedPercent: 100 - remainingPercent, resetAt }]
+  })
+}
+
+function readClaudeUsage(kind: WindowKind, value: unknown): Window | undefined {
+  if (!isRecord(value)) return undefined
+  const used = number(scalar(value.utilization))
+  if (used === undefined) return undefined
+  return { kind, usedPercent: used, resetAt: isoTime(value.resets_at) }
+}
+
+// Matches the Management Center: the Fable weekly limit is the weekly_scoped entry whose model is Fable.
+function readClaudeFable(body: Record<string, unknown>): Window | undefined {
+  const candidates = (Array.isArray(body.limits) ? body.limits : []).filter((limit): limit is Record<string, unknown> => {
+    if (!isRecord(limit) || limit.kind !== "weekly_scoped" || number(scalar(limit.percent)) === undefined) return false
+    const model = isRecord(limit.scope) && isRecord(limit.scope.model) ? text(limit.scope.model.display_name)?.toLowerCase() : undefined
+    return model === "fable" || model === "fable 5"
+  })
+  const limit = candidates.find((item) => item.is_active === true) ?? candidates[0]
+  if (!limit) return undefined
+  return { kind: "fable", usedPercent: number(scalar(limit.percent)) ?? 0, resetAt: isoTime(limit.resets_at) }
+}
+
+function readAntigravityBucket(bucket: unknown): Window[] {
+  if (!isRecord(bucket)) return []
+  const kind = bucket.window === "5h" ? "5h" : bucket.window === "weekly" ? "week" : undefined
+  if (!kind) return []
+  // Protobuf JSON omits zero values, so a bucket without remainingFraction has none left.
+  const remainingFraction = number(scalar(bucket.remainingFraction)) ?? 0
+  return [{ kind, usedPercent: Math.round((1 - remainingFraction) * 10_000) / 100, resetAt: isoTime(bucket.resetTime) }]
+}
+
+function loopback(hostname: string) {
+  return ["localhost", "127.0.0.1", "[::1]"].includes(hostname) ? "loopback" : hostname
+}
+
+function readCodex(signals: Signals, base: number) {
+  const slots = (["Primary", "Secondary"] as const).flatMap((slot, index) => {
+    const used = number(signals[`X-Codex-${slot}-Used-Percent`])
+    if (used === undefined) return []
+    const minutes = number(signals[`X-Codex-${slot}-Window-Minutes`])
+    const after = number(signals[`X-Codex-${slot}-Reset-After-Seconds`])
+    return [
+      {
+        kind: codexKind(minutes, index),
+        usedPercent: used,
+        resetAt: unixSeconds(signals[`X-Codex-${slot}-Reset-At`]) ?? (after === undefined ? undefined : base + after * 1000),
+      },
+    ]
+  })
+  return slots.filter((item, index) => slots.findIndex((other) => other.kind === item.kind) === index)
+}
+
+function codexKind(minutes: number | undefined, index: number): WindowKind {
+  if (minutes === undefined) return index === 0 ? "5h" : "week"
+  if (minutes <= 300) return "5h"
+  if (minutes <= 1440) return "day"
+  return "week"
+}
+
+function toWindow(kind: WindowKind, usedPercent: number | undefined, resetAt: number | undefined) {
+  if (usedPercent === undefined) return undefined
+  return { kind, usedPercent, resetAt }
+}
+
+function fraction(value: string | undefined) {
+  const parsed = number(value)
+  return parsed === undefined ? undefined : Math.round(parsed * 10_000) / 100
+}
+
+function remaining(value: string | undefined) {
+  const parsed = number(value?.replace("%", ""))
+  return parsed === undefined ? undefined : 100 - parsed
+}
+
+function unixSeconds(value: string | undefined) {
+  const parsed = number(value)
+  return parsed === undefined ? undefined : parsed * 1000
+}
+
+function isoTime(value: unknown) {
+  const parsed = typeof value === "string" ? Date.parse(value) : Number.NaN
+  return Number.isNaN(parsed) ? undefined : parsed
+}
+
+function number(value: string | undefined) {
+  if (value === undefined || value.trim() === "") return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function scalar(value: unknown) {
+  return typeof value === "number" || typeof value === "string" ? String(value) : undefined
+}
+
+function text(value: unknown) {
+  return typeof value === "string" ? value.trim() : undefined
+}
+
+function stringSignals(value: Record<string, unknown>): Signals {
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
