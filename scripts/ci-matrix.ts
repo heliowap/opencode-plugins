@@ -1,4 +1,3 @@
-import { appendFileSync } from "node:fs"
 import { join } from "node:path"
 import { listPlugins } from "../install.ts"
 
@@ -32,12 +31,9 @@ async function row(name: string): Promise<Row> {
 
 if (import.meta.main) {
   const all = (await listPlugins()).map((plugin) => plugin.name)
-  const paths = process.argv.includes("--all")
-    ? []
-    : (await Bun.stdin.text()).split("\n").map((line) => line.trim()).filter(Boolean)
-  const selected = process.argv.includes("--all") ? all : selectPlugins(paths, all)
+  const selected = process.argv.includes("--all")
+    ? all
+    : selectPlugins((await Bun.stdin.text()).split("\n").map((line) => line.trim()).filter(Boolean), all)
   const include = await Promise.all(selected.map(row))
-  const lines = `matrix=${JSON.stringify({ include })}\nplugins=${JSON.stringify(selected)}\n`
-  process.stdout.write(lines)
-  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, lines)
+  process.stdout.write(`matrix=${JSON.stringify({ include })}\nplugins=${JSON.stringify(selected)}\n`)
 }

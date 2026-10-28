@@ -14,8 +14,7 @@ Every OpenCode plugin from `heliowap`, one per directory under `plugins/`. Insta
 | `protect-agents-md` | `protect-agents-md` | Denies agent edits to the global `AGENTS.md` until the user approves them | `heliowap/opencode-v2-protect-agents-md` |
 | `redact-secrets` | `redact-secrets` | Masks secrets in tool results and errors | `heliowap/opencode-v2-redact-secrets` |
 | `tps-meter` | `tps.meter.server`, `tps.meter` | Shows a live tokens-per-second meter in the prompt footer | `heliowap/opencode-v2-tps-meter` |
-
-`unpushed-work` is arriving in a parallel PR and is not in this table yet.
+| `unpushed-work` | `local.unpushed-work` | After each successful turn, reports uncommitted and unpushed work across local repositories | local `~/.config/opencode/plugins` |
 
 ## Install
 
@@ -33,7 +32,9 @@ Non-interactive:
 ./install.ts --dry-run --all   # print the commands, run nothing
 ```
 
-The installer runs `opencode plugin add` for each plugin and keeps going if one fails. It prints a summary and exits 1 if any install failed. An unknown name exits 2 and installs nothing.
+The installer runs `opencode plugin add` for each plugin and keeps going if one fails. It prints a summary and exits 1 if any install failed. An unknown name exits 2 and installs nothing. With no arguments and no TTY it prints usage and exits 2.
+
+`OPENCODE_PLUGINS_INTERACTIVE=1` forces the interactive prompt when stdin is not a TTY. It exists for the tests only.
 
 Manually, one plugin at a time:
 

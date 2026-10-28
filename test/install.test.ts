@@ -1,15 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs"
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { listPlugins, specFor } from "../install.ts"
 
 const root = join(import.meta.dir, "..")
 const installer = join(root, "install.ts")
-const names = readdirSync(join(root, "plugins"), { withFileTypes: true })
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => entry.name)
-  .sort()
-const spec = (name: string) => `github:heliowap/opencode-plugins#main::path:plugins/${name}`
+const names = (await listPlugins()).map((plugin) => plugin.name)
+const spec = specFor
 
 let tmp: string
 let bin: string
@@ -51,6 +49,18 @@ async function run(args: string[], opts: { stdin?: string; env?: Record<string, 
 const add = (name: string) => `plugin add ${spec(name)}`
 
 describe("install.ts", () => {
+  test("discovers plugins in sorted order, including known ones", () => {
+    expect(names).toEqual([...names].sort())
+    for (const known of ["goal", "redact-secrets"]) expect(names).toContain(known)
+  })
+
+  test("no arguments without a TTY prints usage and exits 2", async () => {
+    const r = await run([])
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain("Usage")
+    expect(r.calls).toEqual([])
+  })
+
   test("--all installs every plugin", async () => {
     const r = await run(["--all"])
     expect(r.code).toBe(0)
