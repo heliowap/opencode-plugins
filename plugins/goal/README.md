@@ -1,4 +1,6 @@
-# opencode-v2-goal-plugin
+# goal
+
+Formerly `heliowap/opencode-v2-goal-plugin`.
 
 > [!NOTE]
 > This is a community plugin. It is not built by the OpenCode team and is not affiliated with OpenCode in any way.
@@ -10,10 +12,10 @@ Codex-style `/goal` for OpenCode 2. A persistent, per-session objective that kee
 Requires OpenCode 2.
 
 ```sh
-opencode plugin add github:heliowap/opencode-v2-goal-plugin
+opencode plugin add github:heliowap/opencode-plugins#main::path:plugins/goal
 ```
 
-This installs the plugin and adds it to your global `opencode.jsonc`. If `/goal` does not show up, run `opencode service restart`. Update with `opencode plugin update` and uninstall with `opencode plugin remove github:heliowap/opencode-v2-goal-plugin`.
+This installs the plugin and adds it to your global `opencode.jsonc`. If `/goal` does not show up, run `opencode service restart`. Update with `opencode plugin update` and uninstall with `opencode plugin remove github:heliowap/opencode-plugins#main::path:plugins/goal`.
 
 ## Compatibility
 
@@ -94,7 +96,7 @@ Summarize it with `bun run report` in a clone of this repository, or `bun run re
 Either of these turns it off: the plugin option `"log": false`, or `OPENCODE_GOAL_LOG=0` (or `false`) in the environment of the OpenCode server.
 
 ```jsonc
-{ "plugins": [{ "package": "github:heliowap/opencode-v2-goal-plugin", "options": { "log": false } }] }
+{ "plugins": [{ "package": "github:heliowap/opencode-plugins#main::path:plugins/goal", "options": { "log": false } }] }
 ```
 
 ## Headless runs
@@ -133,10 +135,9 @@ The prompts in `templates/` and the tool descriptions are adapted from the `/goa
 Requires Bun. Clone the repository and load your checkout instead of the published package:
 
 ```sh
-git clone https://github.com/heliowap/opencode-v2-goal-plugin.git
-cd opencode-v2-goal-plugin
+git clone https://github.com/heliowap/opencode-plugins.git && cd opencode-plugins/plugins/goal
 bun install
-opencode plugin remove github:heliowap/opencode-v2-goal-plugin   # if installed, so only one goal plugin loads
+opencode plugin remove github:heliowap/opencode-plugins#main::path:plugins/goal   # if installed, so only one goal plugin loads
 ln -sfn "$PWD/src" ~/.config/opencode/plugins/goal
 ```
 

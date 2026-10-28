@@ -1,4 +1,6 @@
-# opencode-v2-base-check
+# base-check
+
+Formerly `heliowap/opencode-v2-base-check`.
 
 An OpenCode v2 plugin that tells a session how stale its git base is **before the first prompt
 runs**, so no session starts blind on top of an outdated branch.
@@ -47,7 +49,7 @@ on its own initiative, and it does not override a rebase you ask for yourself.
 ```jsonc title="opencode.jsonc"
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": [{ "package": "github:heliowap/opencode-v2-base-check", "options": { "base": "origin/dev" } }]
+  "plugins": [{ "package": "github:heliowap/opencode-plugins#main::path:plugins/base-check", "options": { "base": "origin/dev" } }]
 }
 ```
 
@@ -70,7 +72,7 @@ the report asks for the option instead of guessing.
 
 ```jsonc
 {
-  "plugins": [{ "package": "/absolute/path/to/opencode-v2-base-check", "options": { "base": "origin/dev" } }]
+  "plugins": [{ "package": "/absolute/path/to/opencode-plugins/plugins/base-check", "options": { "base": "origin/dev" } }]
 }
 ```
 

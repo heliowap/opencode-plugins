@@ -1,4 +1,6 @@
-# opencode-v2-cliproxy-quota
+# cliproxy-quota
+
+Formerly `heliowap/opencode-v2-cliproxy-quota`.
 
 > [!NOTE]
 > This is a community plugin. It is not built by the OpenCode team or the CLIProxyAPI team and is not affiliated with either.
@@ -38,7 +40,7 @@ The footer shows the account with the most quota left for each window, because C
 Requires OpenCode 2. CLIProxyAPI quota additionally requires a running proxy with a management key (`remote-management.secret-key`).
 
 ```sh
-opencode plugin add github:heliowap/opencode-v2-cliproxy-quota
+opencode plugin add github:heliowap/opencode-plugins#main::path:plugins/cliproxy-quota
 ```
 
 For native quota, connect the OpenAI or OpenCode Go provider in OpenCode; no additional configuration is needed. The credentials are resolved and refreshed by the OpenCode server and never sent to the terminal UI.
@@ -56,7 +58,7 @@ Then open a new terminal and start `opencode`. A terminal UI that was already ru
 OpenCode checks for GitHub plugin updates but does not install them automatically. To use newly published readers:
 
 ```sh
-opencode plugin update github:heliowap/opencode-v2-cliproxy-quota
+opencode plugin update github:heliowap/opencode-plugins#main::path:plugins/cliproxy-quota
 ```
 
 Then reopen the OpenCode terminal UI. Changes in a local checkout do not update a plugin installed from GitHub.
@@ -82,7 +84,7 @@ Pass options with the object form in `opencode.jsonc`. Prefer the environment va
 {
   "plugins": [
     {
-      "package": "github:heliowap/opencode-v2-cliproxy-quota",
+      "package": "github:heliowap/opencode-plugins#main::path:plugins/cliproxy-quota",
       "options": { "baseURL": "http://127.0.0.1:8317", "intervalSeconds": 30 }
     }
   ]

@@ -1,4 +1,6 @@
-# opencode-v2-protect-agents-md
+# protect-agents-md
+
+Formerly `heliowap/opencode-v2-protect-agents-md`.
 
 An OpenCode v2 plugin that stops agents from editing any `AGENTS.md` without
 your explicit approval: the global one (`~/.config/opencode/AGENTS.md`) and
@@ -15,9 +17,9 @@ Install Bun and the client CLI. Run the launcher from your working project,
 using the absolute path to this checkout's entry point.
 
 ```sh
-bun /path/to/opencode-v2-protect-agents-md/bin/protect-agents.ts --client cursor
-bun /path/to/opencode-v2-protect-agents-md/bin/protect-agents.ts --client codex
-bun /path/to/opencode-v2-protect-agents-md/bin/protect-agents.ts --client claude
+bun /path/to/opencode-plugins/plugins/protect-agents-md/bin/protect-agents.ts --client cursor
+bun /path/to/opencode-plugins/plugins/protect-agents-md/bin/protect-agents.ts --client codex
+bun /path/to/opencode-plugins/plugins/protect-agents-md/bin/protect-agents.ts --client claude
 ```
 
 Put client arguments after `--`. Use `--binary` for a custom executable.
@@ -25,7 +27,7 @@ Use repeated `--protect` arguments for additional physical files or existing
 symlinks whose targets have ordinary names.
 
 ```sh
-bun /path/to/opencode-v2-protect-agents-md/bin/protect-agents.ts --client codex --protect ./nested/AGENTS.md -- --model gpt-6.1-sol
+bun /path/to/opencode-plugins/plugins/protect-agents-md/bin/protect-agents.ts --client codex --protect ./nested/AGENTS.md -- --model gpt-6.1-sol
 ```
 
 The launcher does not install hooks or change your global configuration.
@@ -80,7 +82,7 @@ Add the plugin to your OpenCode config:
 
 ```jsonc
 {
-  "plugins": ["github:heliowap/opencode-v2-protect-agents-md"]
+  "plugins": ["github:heliowap/opencode-plugins#main::path:plugins/protect-agents-md"]
 }
 ```
 
