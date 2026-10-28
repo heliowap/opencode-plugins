@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
+import { copyFile, mkdtemp, rm, symlink } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
 import {
   childRoutes,
   dispatch,
@@ -192,20 +192,28 @@ describe("other dispatch modes", () => {
   )
 })
 
-const GLOBAL_PLUGINS = join(homedir(), ".config", "opencode", "plugins")
-const HAS_GLOBAL_PLUGINS = ["model-routes.ts", "redact-secrets.ts"].every((file) => existsSync(join(GLOBAL_PLUGINS, file)))
+const REDACT_SECRETS = resolve(import.meta.dir, "../../redact-secrets/src/index.ts")
 
-describe.skipIf(!HAS_GLOBAL_PLUGINS)("coexistence", () => {
+describe("coexistence", () => {
   test(
-    "fallback still works with the global model-routes and redact-secrets plugins loaded",
+    "fallback still works with the redact-secrets plugin loaded after model-policy",
     async () => {
-      const { host } = await run({
-        script: recovering({ agent: "researcher" }, failing({ [SONNET]: 429 })),
-        extraPlugins: [join(GLOBAL_PLUGINS, "model-routes.ts"), join(GLOBAL_PLUGINS, "redact-secrets.ts")],
-      })
+      // A copy next to a node_modules link, so the sibling plugin resolves this package's dependencies without its own install.
+      const scratch = await mkdtemp(join(tmpdir(), "redact-secrets-"))
+      try {
+        const redact = join(scratch, "redact-secrets.ts")
+        await copyFile(REDACT_SECRETS, redact)
+        await symlink(resolve(import.meta.dir, "../node_modules"), join(scratch, "node_modules"))
+        const { host } = await run({
+          script: recovering({ agent: "researcher" }, failing({ [SONNET]: 429 })),
+          extraPlugins: [redact],
+        })
 
-      expect(childRoutes(host.fixture.agentCalls())).toEqual([`${SONNET}#medium`, `${OPUS}#low`])
-      expect(parentToolResult(host.fixture.calls)).toContain(`child answer from ${OPUS}`)
+        expect(childRoutes(host.fixture.agentCalls())).toEqual([`${SONNET}#medium`, `${OPUS}#low`])
+        expect(parentToolResult(host.fixture.calls)).toContain(`child answer from ${OPUS}`)
+      } finally {
+        await rm(scratch, { recursive: true, force: true })
+      }
     },
     TIMEOUT,
   )

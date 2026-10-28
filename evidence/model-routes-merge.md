@@ -49,3 +49,28 @@ behavior to preserve is: a policied agent that asks for an Anthropic API model i
   test therefore activates providers with non-vendor placeholders and asserts on the built-in models.
 
 Command: `cd plugins/model-policy && bun test ./host/routes.test.ts` → 3 pass, 0 fail.
+
+## After the merge
+
+`plugins/model-routes` is removed; `plugins/model-policy` registers the catalog transform before its first
+`ctx.model.list()` call and runs the user-only check in `execute.before` after the policy rewrite. Rejection also
+covers a `subagent` input with no `agent` string, as model-routes did.
+
+| case | merged plugin alone |
+| --- | --- |
+| (a) `general` + `anthropic/claude-sonnet-5-5` | rejected with the user-only message, no child call |
+| (b) `implementer` + `anthropic/claude-sonnet-5-5` | rewritten to `cli_proxy/cpa-claude-haiku-5-5#medium`, accepted (same as policy-first) |
+| (c) catalog | same as policy-first with routes |
+
+Before the merge the same host test, with only model-policy loaded, failed on (a) and (c) and passed on (b).
+`plugins/model-routes/test` cases are ported to `plugins/model-policy/test/routes.test.ts`.
+`host/dispatch.test.ts` coexistence now loads the sibling `redact-secrets` plugin; it used to skip because it
+required `~/.config/opencode/plugins/model-routes.ts`.
+
+## Red runs (TDD)
+
+- `bun test` before `src/routes.ts` existed: `Cannot find module '../src/routes.ts'` from `test/routes.test.ts`
+  (1 fail, 1 error; 77 pass elsewhere).
+- `bun test ./host/routes.test.ts` with only the merged-plugin form and the unmerged `src/index.ts`: 2 fail (the
+  rejection in (a), and the catalog still holding `anthropic/*` models), 1 pass ((b), already policy-routed).
+- After `src/routes.ts` and the `src/index.ts` change: 83 unit pass; `./host/routes.test.ts` 3 pass.
