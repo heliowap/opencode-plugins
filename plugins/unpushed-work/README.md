@@ -23,10 +23,8 @@ read.
 ## Install
 
 ```sh
-opencode plugin add 'github:<owner>/opencode-plugins#main::path:plugins/unpushed-work'
+opencode plugin add 'github:heliowap/opencode-plugins#main::path:plugins/unpushed-work'
 ```
-
-Replace `<owner>` with the GitHub owner of this repository.
 
 ## Run the CLI by hand
 
