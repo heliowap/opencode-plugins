@@ -1,0 +1,23 @@
+{
+  "name": "opencode-v2-protect-agents-md",
+  "version": "0.1.0",
+  "description": "Denies agent edits to the global AGENTS.md in OpenCode until the user approves them",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "guard": "bun ./bin/protect-agents.ts",
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.0.24"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@typescript/native-preview": "^7.0.0-dev"
+  },
+  "license": "MIT"
+}
