@@ -6,7 +6,7 @@
 - `src/watchdog.ts` and `src/loop.ts` hold the rules for subagent stalls and repeated shell commands. They are separate pure reducers because they apply to sessions without a goal. Time-dependent rules take `now` as an argument; neither module does I/O.
 - `src/index.ts` is a thin adapter: it turns OpenCode events, the `/goal` command, and tool calls into `GoalEvent`s, then runs the returned `GoalEffect`. Every state change goes through `transition`, which holds the semaphore across load, step, save, and perform, and emits the `goal.changed` RPC event.
 - `src/tui.tsx` is the terminal entrypoint. It reads and edits the goal only through the `goal` RPC (`src/rpc.ts`), renders `goalBadge`, `objectiveLines`, and `sidebarTitle`, `dialogTitle` from `src/badge.ts`, and uses `controlsFor`, `budgetEvent`, `verifyEvent`, and `controlEvent` from `src/controls.ts`. A bare `/goal edit` reaches it as the `editRequested` RPC event, because a terminal slash command named `goal` would take over every `/goal` command. Keep display rules in `badge.ts`, where unit and mutation tests reach them. Do not import `solid-js` in `tui.tsx`: an installed package gets its own copy, and its signals never reach the host renderer. Keep reactive state in `context.storage.memory`.
-- `src/verify-plan.ts` maps changed files to the commands AGENTS.md requires for them; `scripts/verify-changed.ts` is its CLI adapter (`bun run verify:changed`).
+- `src/verify-plan.ts` maps changed files to the commands AGENTS.md requires for them; `scripts/verify-changed.ts` is its CLI adapter.
 - `src/command.ts` parses `/goal` arguments into a `GoalCommand` union. `src/prompts.ts` renders `templates/*.md` and formats status text. `src/controls.ts` holds the pure rules for control ids, their availability, and their input-to-event mapping.
 - Model data as tagged unions with `_tag` and `switch` exhaustively. Persisted data is an Effect `Schema`, decoded with `decodeGoal` at the storage boundary.
 
@@ -38,12 +38,11 @@
 
 - For rendered templates, assert the filled slots with `toContain` on a literal line instead of pinning the whole template text.
 - Every reducer branch has a test. A new event or effect ships with its tests.
-- `bun run verify:changed` passes before every commit. `src/verify-plan.ts` is the single source of the selection rules; do not restate them elsewhere.
 - `bun run mutation` keeps a 100% mutation score on the files in `mutate` of `stryker.config.json`. Pure logic goes in one of those files. A surviving mutant means a missing test or redundant code: add the test, or delete the code. Do not exclude mutants.
 
 ## Host canaries
 
-Changes to `src/index.ts` or event handling need a canary in `host/`. A canary starts a real `opencode serve` through `host/harness/host.ts` with a scripted fixture provider (`host/harness/fixture.ts`). Grade it on `host.stored(session)`, files on disk, and `host.fixture.agentRequests()`. Assert exact counts and values. A bug fix lands with a canary or unit test that fails before the fix. Add new canary files to the `goal-host` matrix in the repo root `.github/workflows/ci.yml`.
+Changes to `src/index.ts` or event handling need a canary in `host/`. A canary starts a real `opencode serve` through `host/harness/host.ts` with a scripted fixture provider (`host/harness/fixture.ts`). Grade it on `host.stored(session)`, files on disk, and `host.fixture.agentRequests()`. Assert exact counts and values. Add new canary files to the `goal-host` matrix in the repo root `.github/workflows/ci.yml`.
 
 ## Manual end-to-end checks
 

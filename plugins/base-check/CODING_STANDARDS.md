@@ -40,7 +40,7 @@
 
 ## End-to-end check
 
-Unit tests cannot see the plugin wiring. After changing `src/index.ts`, run `bun script/e2e.ts`. It
+After changing `src/index.ts`, run `bun script/e2e.ts`. It
 builds the same fixture as the tests through `test/harness/repository.ts`, loads this checkout by
 absolute path, serves it from a private `opencode serve` so the user's own service and data are
 untouched, sends two prompts and checks that

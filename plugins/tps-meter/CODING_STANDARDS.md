@@ -14,7 +14,7 @@
 
 ## End-to-end check
 
-Unit tests cannot see the TUI. After changing `src/tui.tsx`:
+After changing `src/tui.tsx`:
 
 1. In a temporary git repository with one commit, write an `opencode.jsonc` whose `plugins` lists this directory.
 2. If your global config also lists the published plugin, OpenCode loads that copy and marks this directory's copy as failed in `/plugins`. Point `XDG_CONFIG_HOME` at a scratch copy of your config without that entry, and confirm `/plugins` shows `tps.meter` as `local`.

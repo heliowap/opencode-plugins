@@ -1,14 +1,18 @@
 # Coding standards
 
-These rules apply to every plugin under `plugins/`. Rules marked "enforced by `lint:repo`" are mechanical: a failing `bun run lint:repo` is the finding, not a judgement call. Plugin-specific rules live in `plugins/<name>/CODING_STANDARDS.md` and override this file.
+These rules apply to every plugin under `plugins/` and to the root code (`install.ts`, `scripts/`, `test/`). A rule marked "enforced by `lint:repo`" is mechanical: a failing `bun run lint:repo` is the finding, not a judgement call.
 
 ## Monorepo
 
-- Each plugin is self-contained and installable from `github:heliowap/opencode-plugins#<ref>::path:plugins/<name>`. It imports nothing from outside its directory and carries its own `package.json`, `bun.lock`, and `tsconfig.json`. Required files: enforced by `lint:repo` (`plugin-shape`). No `workspace:` dependencies: enforced by `lint:repo` (`workspace-dep`).
-- The plugin `id` is stable. Stored state and user config are keyed by it, so a rename orphans both. A plugin may register several ids (server, TUI, slots); list them all in the README table of the root `README.md`.
+- Each plugin is self-contained and installable from `github:heliowap/opencode-plugins#<ref>::path:plugins/<name>`. It imports nothing from outside its directory.
+- Enforced by `lint:repo`:
+  - `plugin-shape`: the plugin has `package.json` (with a `typecheck` script), `bun.lock`, `tsconfig.json`, `README.md`, and a row in the root README table.
+  - `workspace-dep`: no `workspace:` dependencies in a plugin.
+  - `old-spec`: no `github:heliowap/opencode-v2-` spec.
+  - `redacted-literal`: no literal `[REDACTED]`.
+- The plugin `id` is stable. Stored state and user config are keyed by it, so a rename orphans both. A plugin may register several ids (server, TUI, slots); the root README table lists them all.
 - Plugin lists and install specs have one source: `listPlugins` and `specFor` in `install.ts`. Scripts, CI, and tests derive from them. The one exception is the human-facing README table.
 - Pin each new GitHub Action to a full commit SHA, with the version in a comment.
-- No `github:heliowap/opencode-v2-` specs (`old-spec`) and no literal `[REDACTED]` (`redacted-literal`): enforced by `lint:repo`.
 
 ## Architecture
 
@@ -17,16 +21,16 @@ These rules apply to every plugin under `plugins/`. Rules marked "enforced by `l
 
 ## Style
 
-- Prefer `const` and early returns.
-- Do not alias imports or use star imports.
-- Avoid `any`, casts, and `try`/`catch`.
+- Declare with `const` and return early.
+- Import named bindings directly under their own names.
+- Type values precisely; let unexpected errors propagate to the adapter, which handles them.
 - Write a comment only for a non-obvious why, such as a host quirk. State the observed fact.
 - Write everything in English: code, comments, prompts, user-visible text, tests, docs, commit messages, issues, and pull requests.
 
 ## Tests
 
 - Test behavior through the exported functions, the way the adapter calls them. Assert literal expected values.
-- Do not mock. Use real processes, servers, and repositories; `host/harness/` and `test/harness/` hold the fixtures.
+- Use real processes, servers, and repositories; `host/harness/` and `test/harness/` hold the fixtures.
 - Expected values come from the fixture, never from the code under test. These shapes are tautological and fail review:
   - A computed expected value, such as `Date.parse(...)` or arithmetic over the fixture. Write the literal.
   - A restated constant: an upstream URL, header, request body, or config default copied from `src/`. Test the mechanism that reads it.
