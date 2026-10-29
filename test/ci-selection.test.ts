@@ -1,38 +1,47 @@
 import { describe, expect, test } from "bun:test"
-import { goalMutation, goalRuntime, selectPlugins } from "../scripts/ci-matrix.ts"
+import { goalMutation, goalRuntime, parsePackageJson, rootChanged, selectPlugins } from "../scripts/ci-matrix.ts"
 
 const all = ["base-check", "goal", "tps-meter"]
 
 describe("selectPlugins docs rules", () => {
-  test("markdown under a plugin selects nothing", () => {
-    expect(selectPlugins(["plugins/goal/README.md", "plugins/goal/CODING_STANDARDS.md", "plugins/goal/docs/a/b.md"], all)).toEqual([])
+  test("markdown under a plugin selects nothing, a sibling source file does", () => {
+    const docs = ["plugins/goal/README.md", "plugins/goal/CODING_STANDARDS.md", "plugins/goal/docs/a/b.md"]
+    expect(selectPlugins(docs, all)).toEqual([])
+    expect(selectPlugins([...docs, "plugins/tps-meter/src/a.ts"], all)).toEqual(["tps-meter"])
   })
 
   test("anything under plugins/<n>/docs/ is a doc, even non-markdown", () => {
     expect(selectPlugins(["plugins/goal/docs/diagram.png"], all)).toEqual([])
+    expect(selectPlugins(["plugins/goal/diagram.png"], all)).toEqual(["goal"])
   })
 
-  test("root markdown and docs/ select nothing", () => {
-    expect(selectPlugins(["README.md", "AGENTS.md", "CODING_STANDARDS.md", "docs/x.md", "docs/img.png"], all)).toEqual([])
+  test("root markdown and docs/ select nothing, root code selects no plugin either", () => {
+    const docs = ["README.md", "AGENTS.md", "CODING_STANDARDS.md", "docs/x.md", "docs/img.png"]
+    expect(selectPlugins(docs, all)).toEqual([])
+    expect(selectPlugins([...docs, "plugins/goal/package.json"], all)).toEqual(["goal"])
   })
 
   test("a source change next to a doc change still selects the plugin", () => {
     expect(selectPlugins(["plugins/goal/README.md", "plugins/goal/src/a.ts", "plugins/tps-meter/README.md"], all)).toEqual(["goal"])
   })
 
-  test("markdown under templates/ is runtime, not a doc", () => {
-    expect(selectPlugins(["plugins/goal/templates/continuation.md"], all)).toEqual(["goal"])
+  test.each(["templates", "src", "host", "test", "scripts"])("markdown under %s/ is runtime, not a doc", (dir) => {
+    expect(selectPlugins([`plugins/goal/${dir}/NOTES.md`], all)).toEqual(["goal"])
   })
 
-  test("workflow and ci-matrix changes still select everything", () => {
+  test("workflow and ci-matrix changes still select every plugin", () => {
     expect(selectPlugins([".github/workflows/ci.yml"], all)).toEqual(all)
     expect(selectPlugins(["scripts/ci-matrix.ts"], all)).toEqual(all)
+    expect(selectPlugins(["scripts/check.ts"], all)).toEqual([])
   })
 })
 
 describe("goalRuntime", () => {
+  const runtimeSibling = "plugins/goal/src/a.ts"
+
   test.each([
     "plugins/goal/src/a.ts",
+    "plugins/goal/src/NOTES.md",
     "plugins/goal/host/lifecycle.test.ts",
     "plugins/goal/templates/continuation.md",
     "plugins/goal/test/a.test.ts",
@@ -55,26 +64,19 @@ describe("goalRuntime", () => {
     "plugins/goal/NOTICE",
     "plugins/tps-meter/src/a.ts",
     "README.md",
-  ])("%s does not trigger", (path) => {
+  ])("%s does not trigger, a runtime sibling does", (path) => {
     expect(goalRuntime([path])).toBe(false)
+    expect(goalRuntime([path, runtimeSibling])).toBe(true)
   })
 
   test("workflow changes keep exercising the goal host suites", () => {
     expect(goalRuntime([".github/workflows/ci.yml"])).toBe(true)
   })
-
-  test("one runtime path among docs triggers", () => {
-    expect(goalRuntime(["plugins/goal/README.md", "plugins/goal/src/a.ts"])).toBe(true)
-  })
-
-  test("a markdown file inside src/ does not hide a runtime change", () => {
-    expect(goalRuntime(["plugins/goal/src/NOTES.md"])).toBe(true)
-  })
 })
 
 describe("goalMutation", () => {
-  test("src changes trigger", () => {
-    expect(goalMutation(["plugins/goal/src/a.ts"])).toBe(true)
+  test.each(["plugins/goal/src/a.ts", "plugins/goal/src/NOTES.md"])("%s triggers", (path) => {
+    expect(goalMutation([path])).toBe(true)
   })
 
   test.each([
@@ -83,7 +85,49 @@ describe("goalMutation", () => {
     "plugins/goal/package.json",
     "plugins/goal/README.md",
     "plugins/tps-meter/src/a.ts",
-  ])("%s does not trigger", (path) => {
+    ".github/workflows/ci.yml",
+  ])("%s does not trigger, a src sibling does", (path) => {
     expect(goalMutation([path])).toBe(false)
+    expect(goalMutation([path, "plugins/goal/src/a.ts"])).toBe(true)
+  })
+})
+
+describe("rootChanged", () => {
+  test.each([
+    "install.ts",
+    "scripts/check.ts",
+    "scripts/lint-repo.ts",
+    "test/check.test.ts",
+    "package.json",
+    "bun.lock",
+    "tsconfig.json",
+    ".github/workflows/ci.yml",
+  ])("%s triggers the root checks", (path) => {
+    expect(rootChanged([path])).toBe(true)
+  })
+
+  test.each(["README.md", "AGENTS.md", "docs/a.md", "plugins/goal/src/a.ts", "plugins/goal/package.json", "evidence/a.txt"])(
+    "%s does not, a root code sibling does",
+    (path) => {
+      expect(rootChanged([path])).toBe(false)
+      expect(rootChanged([path, "install.ts"])).toBe(true)
+    },
+  )
+})
+
+describe("parsePackageJson", () => {
+  test("reads the scripts", () => {
+    expect(parsePackageJson('{"name":"a","scripts":{"test":"bun test","typecheck":"tsgo"}}')).toEqual({
+      scripts: { test: "bun test", typecheck: "tsgo" },
+    })
+  })
+
+  test("a missing scripts field is an empty record", () => {
+    expect(parsePackageJson('{"name":"a"}')).toEqual({ scripts: {} })
+  })
+
+  test.each(['[]', 'null', '"x"', '{"scripts":[]}', '{"scripts":{"test":1}}', '{"scripts":null}'])("%s has the wrong shape", (text) => {
+    expect(parsePackageJson(text)).toBeUndefined()
+    expect(parsePackageJson('{"scripts":{"test":"x"}}')).toEqual({ scripts: { test: "x" } })
   })
 })

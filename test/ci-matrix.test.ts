@@ -27,11 +27,9 @@ async function run(args: string[], stdin = "", env: Record<string, string> = {})
       .filter(Boolean)
       .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
   )
-  return {
-    code,
-    plugins: JSON.parse(lines.plugins ?? "null") as string[],
-    rows: (JSON.parse(lines.matrix ?? "null") as { include: Row[] }).include,
-  }
+  const plugins: string[] = JSON.parse(lines.plugins ?? "null")
+  const matrix: { include: Row[] } = JSON.parse(lines.matrix ?? "null")
+  return { code, plugins, rows: matrix.include }
 }
 
 describe("ci-matrix", () => {
@@ -78,6 +76,7 @@ describe("ci-matrix", () => {
     const r = await run([], "README.md\ninstall.ts\ntest/install.test.ts\nplugins/unknown/x.ts\n")
     expect(r.plugins).toEqual([])
     expect(r.rows).toEqual([])
+    expect((await run([], "install.ts\nplugins/tps-meter/src/a.ts\n")).plugins).toEqual(["tps-meter"])
   })
 
   test("defaults apply to plugins without overrides", async () => {
@@ -88,8 +87,11 @@ describe("ci-matrix", () => {
   })
 
   test("a plugin without a test script gets an empty test", async () => {
-    const r = await run([], "plugins/redact-secrets/src/index.ts\n")
-    expect(r.rows[0]?.test).toBe("")
+    const r = await run([], "plugins/redact-secrets/src/index.ts\nplugins/base-check/src/index.ts\n")
+    expect(r.rows.map((row) => [row.name, row.test])).toEqual([
+      ["base-check", "bun run test"],
+      ["redact-secrets", ""],
+    ])
   })
 
   test("overrides keep parity with the old per-repo CI", async () => {
@@ -110,7 +112,8 @@ describe("ci-matrix", () => {
     expect(await outputs("plugins/goal/README.md\n")).toEqual(["goal_runtime=false", "goal_mutation=false"])
     expect(await outputs("plugins/goal/host/loop.test.ts\n")).toEqual(["goal_runtime=true", "goal_mutation=false"])
     expect(await outputs("plugins/goal/src/a.ts\n")).toEqual(["goal_runtime=true", "goal_mutation=true"])
-    expect(await outputs("", ["--all"])).toEqual(["goal_runtime=true", "goal_mutation=true"])
+    expect(await outputs("", ["--all"])).toEqual(["goal_runtime=true", "goal_mutation=false"])
+    expect(await outputs("", ["--all", "--with-mutation"])).toEqual(["goal_runtime=true", "goal_mutation=true"])
   })
 
   test("every override key is a plugins/ directory", () => {

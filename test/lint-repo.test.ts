@@ -5,6 +5,7 @@ import { dirname, join } from "node:path"
 import { formatFinding, lintRepo } from "../scripts/lint-repo.ts"
 
 const mask = "[RED" + "ACTED]"
+const violation = `const x = "${mask}"\n`
 const old = "github:heliowap/opencode-" + "v2-"
 const dirs: string[] = []
 
@@ -13,6 +14,7 @@ const base: Record<string, string> = {
   "plugins/alpha/package.json": JSON.stringify({ name: "alpha", scripts: { typecheck: "tsgo --noEmit" } }, null, 2),
   "plugins/alpha/bun.lock": "{}\n",
   "plugins/alpha/README.md": "# alpha\n",
+  "plugins/alpha/tsconfig.json": "{}\n",
 }
 
 function repo(files: Record<string, string>, untracked: Record<string, string> = {}): string {
@@ -34,13 +36,16 @@ afterEach(() => {
 })
 
 describe("lintRepo", () => {
-  test("a conforming repo has no findings", async () => {
+  test("a conforming repo has no findings, the same repo with one violating line has one", async () => {
     expect(await lintRepo(repo({}))).toEqual([])
+    expect((await lintRepo(repo({ "plugins/alpha/src/a.ts": violation }))).map(formatFinding)).toEqual([
+      "plugins/alpha/src/a.ts:1 redacted-literal literal mask text; restore the original value",
+    ])
   })
 
   test("formats findings as path:line rule message", async () => {
     const findings = await lintRepo(repo({ "plugins/alpha/bun.lock": "" }))
-    expect(formatFinding(findings[0]!)).toBe("plugins/alpha/bun.lock:1 plugin-shape missing bun.lock")
+    expect(findings.map(formatFinding)).toEqual(["plugins/alpha/bun.lock:1 plugin-shape missing bun.lock"])
   })
 
   describe("plugin-shape", () => {
@@ -49,6 +54,16 @@ describe("lintRepo", () => {
       expect((await lintRepo(root)).map(formatFinding)).toEqual([
         'plugins/alpha/package.json:1 plugin-shape missing "typecheck" script',
       ])
+    })
+
+    test("missing tsconfig.json", async () => {
+      const root = repo({ "plugins/alpha/tsconfig.json": "" })
+      expect((await lintRepo(root)).map(formatFinding)).toEqual(["plugins/alpha/tsconfig.json:1 plugin-shape missing tsconfig.json"])
+    })
+
+    test("a package.json with the wrong shape is reported", async () => {
+      const root = repo({ "plugins/alpha/package.json": '{"scripts":[]}' })
+      expect((await lintRepo(root)).map(formatFinding)).toEqual(["plugins/alpha/package.json:1 plugin-shape invalid package.json shape"])
     })
 
     test("missing plugin README", async () => {
@@ -68,6 +83,7 @@ describe("lintRepo", () => {
       expect((await lintRepo(root)).map(formatFinding)).toEqual([
         "plugins/beta/package.json:1 plugin-shape missing package.json",
         "plugins/beta/bun.lock:1 plugin-shape missing bun.lock",
+        "plugins/beta/tsconfig.json:1 plugin-shape missing tsconfig.json",
         "README.md:1 plugin-shape plugins/beta is not listed in the root README.md",
       ])
     })
@@ -81,14 +97,14 @@ describe("lintRepo", () => {
       ])
     })
 
-    test("lines starting with Formerly are allowed", async () => {
-      const root = repo({ "plugins/alpha/README.md": `# alpha\n\nFormerly ${old}alpha.\n` })
-      expect(await lintRepo(root)).toEqual([])
+    test("lines starting with Formerly are allowed, other lines are not", async () => {
+      const root = repo({ "plugins/alpha/README.md": `# alpha\n\nFormerly ${old}alpha.\nNow ${old}alpha.\n` })
+      expect((await lintRepo(root)).map((f) => `${f.path}:${f.line}`)).toEqual(["plugins/alpha/README.md:4"])
     })
 
-    test("the bare repo name without github: is allowed", async () => {
-      const root = repo({ "docs/a.md": "see heliowap/opencode-v2-alpha\n" })
-      expect(await lintRepo(root)).toEqual([])
+    test("the bare repo name without github: is allowed, with github: it is not", async () => {
+      const root = repo({ "docs/a.md": `see heliowap/opencode-v2-alpha\nsee ${old}alpha\n` })
+      expect((await lintRepo(root)).map((f) => `${f.path}:${f.line}`)).toEqual(["docs/a.md:2"])
     })
   })
 
@@ -100,17 +116,23 @@ describe("lintRepo", () => {
       ])
     })
 
-    test("plugins/redact-secrets and evidence are allowed", async () => {
+    test("plugins/redact-secrets and evidence are allowed, another path is not", async () => {
       const root = repo({
-        "plugins/redact-secrets/src/index.ts": `const MASK = "${mask}"\n`,
+        "plugins/redact-secrets/src/index.ts": violation,
         "evidence/run.txt": `${mask}\n`,
+        "plugins/alpha/src/b.ts": violation,
       })
-      expect((await lintRepo(root)).filter((f) => f.rule === "redacted-literal")).toEqual([])
+      expect((await lintRepo(root)).filter((f) => f.rule === "redacted-literal").map((f) => f.path)).toEqual(["plugins/alpha/src/b.ts"])
     })
 
-    test("a line that describes the mask is allowed", async () => {
-      const root = repo({ "docs/a.md": `The mask is ${mask}.\n` })
-      expect(await lintRepo(root)).toEqual([])
+    test("a markdown line that describes the mask is allowed, one that does not is flagged", async () => {
+      const root = repo({ "docs/a.md": `The mask is ${mask}.\nplain ${mask}\n` })
+      expect((await lintRepo(root)).map((f) => `${f.path}:${f.line} ${f.rule}`)).toEqual(["docs/a.md:2 redacted-literal"])
+    })
+
+    test("code that names the mask is still flagged outside plugins/redact-secrets", async () => {
+      const root = repo({ "plugins/alpha/src/a.ts": `const mask = "${mask}"\n` })
+      expect((await lintRepo(root)).map((f) => `${f.path}:${f.line} ${f.rule}`)).toEqual(["plugins/alpha/src/a.ts:1 redacted-literal"])
     })
 
     test("a sibling plugin is not allowed", async () => {
@@ -128,24 +150,53 @@ describe("lintRepo", () => {
       ])
     })
 
-    test("the root package.json is not checked", async () => {
-      const root = repo({ "package.json": '{"dependencies":{"x":"workspace:*"}}\n' })
-      expect(await lintRepo(root)).toEqual([])
+    test("the root package.json is not checked, a plugin one is", async () => {
+      const pkg = '{"scripts":{"typecheck":"x"},"dependencies":{"x":"workspace:*"}}\n'
+      const root = repo({ "package.json": pkg, "plugins/alpha/package.json": pkg })
+      expect((await lintRepo(root)).map((f) => f.path)).toEqual(["plugins/alpha/package.json"])
     })
   })
 
-  test("untracked files are ignored", async () => {
-    const root = repo({}, { "plugins/alpha/src/a.ts": `${mask}\n`, "docs/b.md": `${old}x\n` })
-    expect(await lintRepo(root)).toEqual([])
+  test("untracked files are ignored, tracked ones are linted", async () => {
+    const root = repo({ "plugins/alpha/src/t.ts": violation }, { "plugins/alpha/src/a.ts": `${mask}\n`, "docs/b.md": `${old}x\n` })
+    expect((await lintRepo(root)).map((f) => f.path)).toEqual(["plugins/alpha/src/t.ts"])
   })
 
   test("files deleted from the worktree but still tracked are skipped", async () => {
-    const root = repo({ "docs/gone.md": "x\n" })
+    const root = repo({ "docs/gone.md": `${old}x\n`, "docs/kept.md": `${old}y\n` })
     rmSync(join(root, "docs/gone.md"))
-    expect(await lintRepo(root)).toEqual([])
+    expect((await lintRepo(root)).map((f) => f.path)).toEqual(["docs/kept.md"])
   })
 
-  test("the real repository is clean", async () => {
-    expect((await lintRepo(join(import.meta.dir, ".."))).map(formatFinding)).toEqual([])
+  describe("staged mode", () => {
+    const git = (root: string, ...args: string[]) => Bun.spawnSync(["git", ...args], { cwd: root })
+
+    test("lints the staged blob, not the working tree", async () => {
+      const root = repo({})
+      writeFileSync(join(root, "plugins/alpha/src.ts"), violation)
+      git(root, "add", "plugins/alpha/src.ts")
+      writeFileSync(join(root, "plugins/alpha/src.ts"), "const x = 1\n")
+      expect((await lintRepo(root, { staged: true })).map(formatFinding)).toEqual([
+        "plugins/alpha/src.ts:1 redacted-literal literal mask text; restore the original value",
+      ])
+      expect(await lintRepo(root, { staged: false })).toEqual([])
+    })
+
+    test("ignores an unstaged violation that the index does not have", async () => {
+      const root = repo({ "plugins/alpha/src.ts": "const x = 1\n" })
+      writeFileSync(join(root, "plugins/alpha/src.ts"), violation)
+      expect(await lintRepo(root, { staged: true })).toEqual([])
+      expect((await lintRepo(root, { staged: false })).map((f) => f.rule)).toEqual(["redacted-literal"])
+    })
+
+    test("plugin-shape reads the staged package.json", async () => {
+      const root = repo({})
+      writeFileSync(join(root, "plugins/alpha/package.json"), '{"scripts":{}}')
+      git(root, "add", "plugins/alpha/package.json")
+      writeFileSync(join(root, "plugins/alpha/package.json"), '{"scripts":{"typecheck":"x"}}')
+      expect((await lintRepo(root, { staged: true })).map(formatFinding)).toEqual([
+        'plugins/alpha/package.json:1 plugin-shape missing "typecheck" script',
+      ])
+    })
   })
 })
