@@ -1,0 +1,7 @@
+#!/bin/sh
+cd "$(git rev-parse --show-toplevel)" || exit 1
+if ! bun run check --staged; then
+  echo >&2
+  echo "pre-commit: checks failed. Fix them, or skip with: git commit --no-verify" >&2
+  exit 1
+fi
