@@ -8,8 +8,8 @@ These rules apply to every plugin under `plugins/` and to the root code (`instal
 - Enforced by `lint:repo`:
   - `plugin-shape`: the plugin has `package.json` (with a `typecheck` script), `bun.lock`, `tsconfig.json`, `README.md`, and a row in the root README table.
   - `workspace-dep`: no `workspace:` dependencies in a plugin.
-  - `old-spec`: no `github:heliowap/opencode-v2-` spec.
-  - `redacted-literal`: no literal `[REDACTED]`.
+  - `old-spec`: install specs point at this monorepo, never at the archived `opencode-v2-*` repos.
+  - `redacted-literal`: files carry real values, never the redact-secrets mask placeholder.
 - The plugin `id` is stable. Stored state and user config are keyed by it, so a rename orphans both. A plugin may register several ids (server, TUI, slots); the root README table lists them all.
 - Plugin lists and install specs have one source: `listPlugins` and `specFor` in `install.ts`. Scripts, CI, and tests derive from them. The one exception is the human-facing README table.
 - Pin each new GitHub Action to a full commit SHA, with the version in a comment.
