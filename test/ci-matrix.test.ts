@@ -100,6 +100,19 @@ describe("ci-matrix", () => {
     expect(by["protect-agents-md"]).toMatchObject({ runner: "macos-latest", opencode: "2.0.32", bun: "1.4.3" })
   })
 
+  test("emits goal_runtime and goal_mutation outputs", async () => {
+    const outputs = async (stdin: string, args: string[] = []) => {
+      const proc = Bun.spawn(["bun", script, ...args], { stdin: new Response(stdin), stdout: "pipe", stderr: "pipe" })
+      const out = (await new Response(proc.stdout).text()).split("\n")
+      await proc.exited
+      return out.filter((line) => line.startsWith("goal_"))
+    }
+    expect(await outputs("plugins/goal/README.md\n")).toEqual(["goal_runtime=false", "goal_mutation=false"])
+    expect(await outputs("plugins/goal/host/loop.test.ts\n")).toEqual(["goal_runtime=true", "goal_mutation=false"])
+    expect(await outputs("plugins/goal/src/a.ts\n")).toEqual(["goal_runtime=true", "goal_mutation=true"])
+    expect(await outputs("", ["--all"])).toEqual(["goal_runtime=true", "goal_mutation=true"])
+  })
+
   test("every override key is a plugins/ directory", () => {
     for (const key of Object.keys(OVERRIDES)) expect(dirs).toContain(key)
   })
