@@ -2,6 +2,12 @@
 
 These rules follow the [OpenCode style guide](https://github.com/anomalyco/opencode/blob/dev/AGENTS.md), adapted to this plugin.
 
+## Style
+
+- Prefer `flatMap`, `filter`, and `map` over loops, and no `else`.
+- Keep one function unless a helper is reused or names a real concept.
+- Avoid destructuring that drops context.
+
 ## Architecture
 
 - `src/quota.ts` holds every quota rule as pure functions: parsing the management API response, mapping a model to a provider, summarizing, and formatting. It does no I/O and takes `now` as an argument.
@@ -13,31 +19,11 @@ These rules follow the [OpenCode style guide](https://github.com/anomalyco/openc
 - Add a provider with recorded signals to `READERS`, or one that needs an upstream request through the proxy's `api-call` to `PROBES`. Add its model pattern to `MODEL_PROVIDERS`, which is ordered, so put specific patterns before general ones. Every change ships with tests.
 - Windows store `usedPercent`. The UI shows `100 - usedPercent` as the quota left, matching the CLIProxyAPI Management Center.
 
-## Style
-
-- Prefer `const`, early returns, and no `else`.
-- Prefer `flatMap`, `filter`, and `map` over loops.
-- Do not alias imports or use star imports.
-- Avoid `any`, `try`/`catch`, and destructuring that drops context.
-- Keep one function unless a helper is reused or names a real concept.
-- Comments explain a non-obvious why, such as a host quirk. Do not narrate the code.
-- All user-visible text is English.
-
 ## Tests
 
-- Write the failing test first, run it to see it fail, then implement.
-- Test behavior: call the exported functions the way `src/tui.tsx` does and assert literal values with `toEqual` or `toBe`.
-- Tautological tests are forbidden. A test must fail when every function it imports returns `undefined`. These shapes break that rule:
-  - A weak assertion: `toBeDefined`, `toBeTruthy`, `not.toThrow`, `toBeInstanceOf`, `toBeGreaterThan(0)`, or none.
-  - An absence alone: `toEqual([])`, `toBe("")`, `toBe(false)`, or `toBeUndefined` without a presence check on another input in the same test.
-  - An expected value computed by code, such as `Date.parse(...)`. Write the literal.
-  - A restated constant: an upstream URL, header, request body, or config default copied from `src/`. Test the mechanism that reads it, such as which credentials get a probe and which fields come from the credential.
-  - A fixture that asserts itself, where the subject never runs in the test body.
-- `bun script/check-tests.ts` enforces the first rule. It replaces every function exported from each source module in its `modules` list with one that returns `undefined` and fails if any test still passes. Add new source modules to that list.
-- Do not mock. `test/client.test.ts` runs a real `Bun.serve` server.
-- `bun test` and `bun run typecheck` pass before every commit.
+- The root `CODING_STANDARDS.md` defines the tautological shapes. `bun script/check-tests.ts` enforces the first one mechanically: a test must fail when every function it imports returns `undefined`. It replaces every function exported from each source module in its `modules` list with one that returns `undefined` and fails if any test still passes. Add new source modules to that list.
+- `test/client.test.ts` runs a real `Bun.serve` server.
 - `bunfig.toml` turns on coverage and fails `bun test` below 95% of lines or functions in the files the tests load. `src/tui.tsx` and the entry points are not loaded by tests; check them end to end instead.
-- CI (`.github/workflows/ci.yml`) runs `typecheck`, `test`, and `check-tests` as parallel jobs on every push to `main` and every pull request. All three are required checks on `main`. Pin new actions to a full commit SHA with the version in a comment.
 
 ## End-to-end checks
 

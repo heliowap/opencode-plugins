@@ -7,8 +7,8 @@
   errors: a branch that tracks nothing, a configured base ref the repository does not have, a
   repository with no remote. They are returned as states or absent fields, never thrown, and never
   as a placeholder value standing in for a fact that was not read.
-- `src/describe.ts` owns every wording rule behind one pure function, `describe(facts)`. It does no
-  I/O and always returns a report.
+- `src/describe.ts` owns every wording rule behind one function, `describe(facts)`, which always returns a
+  report.
 - `src/index.ts` owns the wiring and the per-session bookkeeping that the wiring needs: which
   sessions already carry a report, and which have a warm-up in flight. Ownership is decided per
   event and per prompt, never recorded. Rules about git or about wording stay out of it.
@@ -32,25 +32,11 @@
   `src/index.ts`, not just a timeout per git command: the steps run in sequence and their timeouts
   would otherwise add up. Past the deadline the prompt goes through unannotated.
 
-## Style
-
-- Prefer `const` and early returns.
-- Do not alias imports or use star imports.
-- Avoid `any`, casts, and `try`/`catch`.
-- Comments explain a non-obvious why. Do not narrate the code.
-- All user-visible text is English.
-
 ## Tests
 
-- Write the failing test first, run it to see it fail, then implement.
-- Test through `inspect` and `describe`, the way `src/index.ts` calls them, and assert literal
-  values.
-- Do not mock. `test/harness/repository.ts` builds real repositories: a bare origin whose default
-  branch is `dev`, a seed clone that publishes to it, and the clone under test.
-- Expected counts come from the fixture's history, not from the code's own arithmetic. The staleness
-  test also asserts that the clone's local refs still say zero, so a passing run proves the fetch
-  ran rather than assuming it.
-- `bun test` and `bun run typecheck` pass before every commit.
+- Test through `inspect` and `describe`, the way `src/index.ts` calls them.
+- `test/harness/repository.ts` builds real repositories: a bare origin whose default branch is `dev`, a seed clone that publishes to it, and the clone under test. Expected counts come from that history.
+- The staleness test also asserts that the clone's local refs still say zero, so a passing run proves the fetch ran rather than assuming it.
 
 ## End-to-end check
 
