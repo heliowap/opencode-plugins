@@ -9,8 +9,7 @@ Every OpenCode plugin from `heliowap`, one per directory under `plugins/`. Insta
 | `base-check` | `base-check` | Tells an OpenCode session how stale its git base is, before the first prompt runs, without touching the working tree | `heliowap/opencode-v2-base-check` |
 | `cliproxy-quota` | `cliproxy.quota.server`, `cliproxy.quota`, `cliproxy.quota.refresh` | Shows CLIProxyAPI 5-hour and weekly quota usage in the prompt footer and sidebar | `heliowap/opencode-v2-cliproxy-quota` |
 | `goal` | `goal`, `goal.status`, `goal.controls` | Codex-style `/goal`: a persistent, audited objective that keeps a session working across turns | `heliowap/opencode-v2-goal-plugin` |
-| `model-policy` | `model-policy` | Enforces the model route of delegated subagent work | `heliowap/opencode-v2-model-policy` |
-| `model-routes` | `model-routes` | Restricts OpenAI and Anthropic models in the catalog to approved providers. Being merged into `model-policy`. | `heliowap/opencode-v2-model-routes` |
+| `model-policy` | `model-policy` | Enforces the model route of delegated subagent work. Absorbs the former `heliowap/opencode-v2-model-routes`, which restricted OpenAI and Anthropic models in the catalog to approved providers. | `heliowap/opencode-v2-model-policy` |
 | `protect-agents-md` | `protect-agents-md` | Denies agent edits to the global `AGENTS.md` until the user approves them | `heliowap/opencode-v2-protect-agents-md` |
 | `redact-secrets` | `redact-secrets` | Masks secrets in tool results and errors | `heliowap/opencode-v2-redact-secrets` |
 | `tps-meter` | `tps.meter.server`, `tps.meter` | Shows a live tokens-per-second meter in the prompt footer | `heliowap/opencode-v2-tps-meter` |
