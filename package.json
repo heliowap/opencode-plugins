@@ -1,1 +1,1 @@
-{"name":"opencode-plugins","private":true,"type":"module","scripts":{"typecheck":"tsgo --noEmit","test":"bun test ./test"},"devDependencies":{"@types/bun":"latest","@typescript/native-preview":"^7.0.0-dev"}}
+{"name":"opencode-plugins","private":true,"type":"module","scripts":{"typecheck":"tsgo --noEmit","test":"bun test ./test","check":"bun scripts/check.ts","check:all":"bun run check --all","lint:repo":"bun scripts/lint-repo.ts","prepare":"git config core.hooksPath .githooks"},"devDependencies":{"@types/bun":"latest","@typescript/native-preview":"^7.0.0-dev"}}

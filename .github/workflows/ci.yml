@@ -23,6 +23,8 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       plugins: ${{ steps.matrix.outputs.plugins }}
+      goal_runtime: ${{ steps.matrix.outputs.goal_runtime }}
+      goal_mutation: ${{ steps.matrix.outputs.goal_mutation }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -66,6 +68,17 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test ./test
+      - run: bun run lint:repo
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/actionlint.tgz" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/actionlint.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tgz" -C "$RUNNER_TEMP" actionlint
+      - name: actionlint
+        run: '"$RUNNER_TEMP/actionlint" .github/workflows/ci.yml'
 
   plugin:
     name: plugin (${{ matrix.name }})
@@ -97,7 +110,7 @@ jobs:
 
   goal-mutation:
     needs: changes
-    if: contains(fromJSON(needs.changes.outputs.plugins), 'goal')
+    if: needs.changes.outputs.goal_mutation == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -127,7 +140,7 @@ jobs:
   goal-host:
     name: goal-host (${{ matrix.suite }})
     needs: changes
-    if: contains(fromJSON(needs.changes.outputs.plugins), 'goal')
+    if: needs.changes.outputs.goal_runtime == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
