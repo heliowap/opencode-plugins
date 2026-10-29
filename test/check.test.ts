@@ -1,23 +1,29 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { changedPaths, cleanEnv, parseArgs, selectChecks, summaryLine, unitTestCommand } from "../scripts/check.ts"
+import { parsePackageJson } from "../scripts/ci-matrix.ts"
+import { changedPaths, checkPackage, cleanEnv, lintCommand, parseArgs, planChecks, summaryLine, unitTestCommand } from "../scripts/check.ts"
 
 const root = join(import.meta.dir, "..")
 const all = ["base-check", "goal", "tps-meter"]
 const dirs: string[] = []
+const gitVars = ["GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"]
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+  for (const name of gitVars) delete process.env[name]
 })
 
-describe("parseArgs", () => {
-  test("defaults", () => {
-    expect(parseArgs([])).toEqual({ every: false, staged: false })
-  })
+const scratch = (prefix: string) => {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  dirs.push(dir)
+  return dir
+}
 
-  test("--all and --staged", () => {
+describe("parseArgs", () => {
+  test("defaults, then each flag", () => {
+    expect(parseArgs([])).toEqual({ every: false, staged: false })
     expect(parseArgs(["--all"])).toEqual({ every: true, staged: false })
     expect(parseArgs(["--staged"])).toEqual({ every: false, staged: true })
   })
@@ -27,30 +33,36 @@ describe("parseArgs", () => {
   })
 })
 
-describe("selectChecks", () => {
-  test("--all selects every plugin", () => {
-    expect(selectChecks([], all, true)).toEqual(all)
+describe("planChecks", () => {
+  test("--all selects every plugin and the root", () => {
+    expect(planChecks([], all, true)).toEqual({ plugins: all, root: true })
   })
 
-  test("applies the CI selection rules", () => {
-    expect(selectChecks(["plugins/goal/src/a.ts", "plugins/tps-meter/README.md"], all, false)).toEqual(["goal"])
+  test("applies the CI selection rules to plugins", () => {
+    expect(planChecks(["plugins/goal/src/a.ts", "plugins/tps-meter/README.md"], all, false)).toEqual({ plugins: ["goal"], root: false })
   })
 
-  test("a docs-only change selects nothing", () => {
-    expect(selectChecks(["README.md", "docs/a.md", "plugins/goal/docs/b.md"], all, false)).toEqual([])
+  test("a docs-only change selects nothing, a source sibling selects a plugin", () => {
+    const docs = ["README.md", "docs/a.md", "plugins/goal/docs/b.md"]
+    expect(planChecks(docs, all, false)).toEqual({ plugins: [], root: false })
+    expect(planChecks([...docs, "plugins/base-check/src/a.ts"], all, false)).toEqual({ plugins: ["base-check"], root: false })
   })
 
-  test("a workflow change selects every plugin", () => {
-    expect(selectChecks([".github/workflows/ci.yml"], all, false)).toEqual(all)
+  test.each(["install.ts", "scripts/check.ts", "test/a.test.ts", "package.json", "bun.lock", "tsconfig.json"])(
+    "%s selects the root and no plugin",
+    (path) => {
+      expect(planChecks([path], all, false)).toEqual({ plugins: [], root: true })
+    },
+  )
+
+  test("a workflow change selects every plugin and the root", () => {
+    expect(planChecks([".github/workflows/ci.yml"], all, false)).toEqual({ plugins: all, root: true })
   })
 })
 
 describe("unitTestCommand", () => {
-  test("no test script runs nothing", () => {
+  test("no test script runs nothing, a test script runs", () => {
     expect(unitTestCommand({ scripts: { typecheck: "tsgo" } }, false, "")).toBeUndefined()
-  })
-
-  test("a plain test script runs through the package script", () => {
     expect(unitTestCommand({ scripts: { test: "bun test" } }, false, "")).toEqual(["bun", "run", "test"])
   })
 
@@ -79,6 +91,13 @@ describe("cleanEnv", () => {
   })
 })
 
+describe("lintCommand", () => {
+  test("passes --staged only for staged runs", () => {
+    expect(lintCommand(false)).toEqual(["bun", join(root, "scripts/lint-repo.ts")])
+    expect(lintCommand(true)).toEqual(["bun", join(root, "scripts/lint-repo.ts"), "--staged"])
+  })
+})
+
 describe("summaryLine", () => {
   test("pass", () => {
     expect(summaryLine({ name: "goal", ok: true, ms: 12345 })).toBe("PASS goal 12.3s")
@@ -89,16 +108,49 @@ describe("summaryLine", () => {
   })
 })
 
+describe("checkPackage", () => {
+  function fakePlugin(testScript: string): string {
+    const dir = scratch("check-package-")
+    mkdirSync(join(dir, "node_modules"))
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fake", scripts: { typecheck: "true", test: testScript } }))
+    return dir
+  }
+
+  const requiresCleanGit = 'test -z "$GIT_DIR$GIT_INDEX_FILE$GIT_WORK_TREE"'
+
+  test("runs the plugin commands without the git variables a hook exports", async () => {
+    const dir = fakePlugin(requiresCleanGit)
+    for (const name of gitVars) process.env[name] = "/somewhere"
+    const control = Bun.spawnSync(["sh", "-c", requiresCleanGit], { env: { ...process.env } })
+    expect(control.exitCode).toBe(1)
+    const result = await checkPackage("fake", dir)
+    expect(result).toMatchObject({ name: "fake", ok: true })
+  })
+
+  test("a failing test step is reported with its step and output", async () => {
+    const result = await checkPackage("fake", fakePlugin("echo boom-output; exit 3"))
+    expect(result).toMatchObject({ name: "fake", ok: false, step: "test" })
+    expect(result.output).toContain("boom-output")
+  })
+
+  test("a failing typecheck stops before the tests", async () => {
+    const dir = fakePlugin("echo should-not-run")
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { typecheck: "exit 1", test: "echo should-not-run" } }))
+    const result = await checkPackage("fake", dir)
+    expect(result).toMatchObject({ ok: false, step: "typecheck" })
+    expect(result.output).not.toContain("should-not-run")
+  })
+})
+
 describe("changedPaths", () => {
   const git = (cwd: string, ...args: string[]) => {
-    const proc = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd })
+    const proc = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env: cleanEnv(process.env) })
     if (proc.exitCode !== 0) throw new Error(proc.stderr.toString())
     return proc.stdout.toString().trim()
   }
 
   function fixture() {
-    const dir = mkdtempSync(join(tmpdir(), "check-paths-"))
-    dirs.push(dir)
+    const dir = scratch("check-paths-")
     const put = (name: string, text: string) => writeFileSync(join(dir, name), text)
     git(dir, "init", "-q", "-b", "main")
     put("base.txt", "base\n")
@@ -130,21 +182,21 @@ describe("changedPaths", () => {
     expect(await changedPaths(dir, true)).toEqual(["staged.txt"])
   })
 
-  test("returns undefined when origin/main does not exist", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "check-paths-"))
-    dirs.push(dir)
+  test("returns undefined without origin/main, paths with it", async () => {
+    const dir = scratch("check-paths-")
     git(dir, "init", "-q", "-b", "main")
     writeFileSync(join(dir, "a.txt"), "a\n")
     git(dir, "add", "-A")
     git(dir, "commit", "-qm", "a")
     expect(await changedPaths(dir, false)).toBeUndefined()
+    expect(await changedPaths(fixture().dir, false)).toEqual(["committed.txt"])
   })
 })
 
 describe("wiring", () => {
   test("root scripts expose the documented interface", async () => {
-    const pkg = await Bun.file(join(root, "package.json")).json()
-    expect(pkg.scripts).toMatchObject({
+    const pkg = parsePackageJson(await Bun.file(join(root, "package.json")).text())
+    expect(pkg?.scripts).toMatchObject({
       check: "bun scripts/check.ts",
       "check:all": "bun run check --all",
       "lint:repo": "bun scripts/lint-repo.ts",
@@ -154,7 +206,7 @@ describe("wiring", () => {
 
   test("the pre-commit hook is executable, checks staged files and documents the bypass", async () => {
     const hook = join(root, ".githooks/pre-commit")
-    expect(statSync(hook).mode & 0o111).not.toBe(0)
+    expect(statSync(hook).mode & 0o111).toBe(0o111)
     const text = await Bun.file(hook).text()
     expect(text).toContain("bun run check --staged")
     expect(text).toContain("git commit --no-verify")

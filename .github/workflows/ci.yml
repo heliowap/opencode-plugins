@@ -39,7 +39,7 @@ jobs:
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
           if [ "$EVENT" = workflow_dispatch ]; then
-            bun scripts/ci-matrix.ts --all >> "$GITHUB_OUTPUT"
+            bun scripts/ci-matrix.ts --all --with-mutation >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ "$EVENT" = pull_request ]; then

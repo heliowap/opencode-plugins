@@ -1,27 +1,53 @@
 #!/usr/bin/env bun
 import { join } from "node:path"
+import { specFor } from "../install.ts"
+import { parsePackageJson } from "./ci-matrix.ts"
 
 export type Finding = { path: string; line: number; rule: string; message: string }
+type Options = { staged: boolean }
+type Read = (path: string) => string | undefined
 
 const OLD_SPEC = "github:heliowap/opencode-" + "v2-"
 const MASK = "[RED" + "ACTED]"
 const MASK_ALLOWED_PATHS = ["plugins/redact-secrets/", "evidence/"]
 const MASK_DESCRIPTION = /\bmask\b/i
+const PLUGIN_FILES = ["bun.lock", "tsconfig.json", "README.md"]
 
 export const formatFinding = (finding: Finding) => `${finding.path}:${finding.line} ${finding.rule} ${finding.message}`
 
-async function trackedFiles(root: string): Promise<string[]> {
-  const proc = Bun.spawn(["git", "ls-files", "-z"], { cwd: root, stdout: "pipe", stderr: "pipe" })
-  const out = await new Response(proc.stdout).text()
-  if ((await proc.exited) !== 0) throw new Error(`git ls-files failed in ${root}: ${await new Response(proc.stderr).text()}`)
-  return out.split("\0").filter(Boolean)
+async function git(root: string, args: string[], input?: string): Promise<Uint8Array> {
+  const proc = Bun.spawn(["git", ...args], { cwd: root, stdin: input === undefined ? "ignore" : new Blob([input]), stdout: "pipe", stderr: "pipe" })
+  const [out, err] = await Promise.all([new Response(proc.stdout).bytes(), new Response(proc.stderr).text()])
+  if ((await proc.exited) !== 0) throw new Error(`git ${args.join(" ")} failed in ${root}: ${err}`)
+  return out
 }
 
-async function readText(root: string, path: string): Promise<string | undefined> {
-  const file = Bun.file(join(root, path))
-  if (!(await file.exists())) return undefined
-  const text = await file.text()
-  return text.includes("\0") ? undefined : text
+const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
+const textOrUndefined = (text: string) => (text.includes("\0") ? undefined : text)
+
+async function stagedContents(root: string, files: string[]): Promise<Map<string, string | undefined>> {
+  const out = await git(root, ["cat-file", "--batch"], files.map((file) => `:${file}\n`).join(""))
+  const contents = new Map<string, string | undefined>()
+  let offset = 0
+  for (const file of files) {
+    const headerEnd = out.indexOf(10, offset)
+    const [, type, size] = decode(out.subarray(offset, headerEnd)).split(" ")
+    const length = Number(size)
+    const start = headerEnd + 1
+    contents.set(file, type === "blob" ? textOrUndefined(decode(out.subarray(start, start + length))) : undefined)
+    offset = start + length + 1
+  }
+  return contents
+}
+
+async function workingContents(root: string, files: string[]): Promise<Map<string, string | undefined>> {
+  const entries = await Promise.all(
+    files.map(async (file): Promise<[string, string | undefined]> => {
+      const handle = Bun.file(join(root, file))
+      return [file, (await handle.exists()) ? textOrUndefined(await handle.text()) : undefined]
+    }),
+  )
+  return new Map(entries)
 }
 
 function scanLines(path: string, text: string, check: (line: string) => Omit<Finding, "path" | "line"> | undefined): Finding[] {
@@ -33,69 +59,67 @@ function scanLines(path: string, text: string, check: (line: string) => Omit<Fin
   return found
 }
 
-async function pluginShape(root: string, files: string[]): Promise<Finding[]> {
+function pluginShape(files: string[], read: Read): Finding[] {
   const tracked = new Set(files)
-  const names = [...new Set(files.map((file) => file.match(/^plugins\/([^/]+)\//)?.[1]).filter((name) => name !== undefined))]
-  const rootReadme = (await readText(root, "README.md")) ?? ""
+  const names = [...new Set(files.flatMap((file) => file.match(/^plugins\/([^/]+)\//)?.[1] ?? []))]
+  const rootReadme = read("README.md") ?? ""
   const found: Finding[] = []
   const add = (path: string, message: string) => found.push({ path, line: 1, rule: "plugin-shape", message })
   for (const name of names) {
     const dir = `plugins/${name}`
-    if (!tracked.has(`${dir}/package.json`)) add(`${dir}/package.json`, "missing package.json")
+    const pkgText = read(`${dir}/package.json`)
+    if (!tracked.has(`${dir}/package.json`) || pkgText === undefined) add(`${dir}/package.json`, "missing package.json")
     else {
-      const pkg = JSON.parse((await readText(root, `${dir}/package.json`)) ?? "{}")
-      if (!pkg.scripts?.typecheck) add(`${dir}/package.json`, 'missing "typecheck" script')
+      const pkg = parsePackageJson(pkgText)
+      if (pkg === undefined) add(`${dir}/package.json`, "invalid package.json shape")
+      else if (!pkg.scripts.typecheck) add(`${dir}/package.json`, 'missing "typecheck" script')
     }
-    if (!tracked.has(`${dir}/bun.lock`)) add(`${dir}/bun.lock`, "missing bun.lock")
-    if (!tracked.has(`${dir}/README.md`)) add(`${dir}/README.md`, "missing README.md")
+    for (const file of PLUGIN_FILES) if (!tracked.has(`${dir}/${file}`)) add(`${dir}/${file}`, `missing ${file}`)
     if (!rootReadme.includes(`\`${name}\``)) add("README.md", `${dir} is not listed in the root README.md`)
   }
   return found
 }
 
-export async function lintRepo(root: string): Promise<Finding[]> {
-  const files = await trackedFiles(root)
-  const found = await pluginShape(root, files)
-  const perFile = await Promise.all(
-    files.map(async (path) => {
-      const text = await readText(root, path)
-      if (text === undefined) return []
-      const out: Finding[] = []
-      if (text.includes(OLD_SPEC)) {
-        out.push(
-          ...scanLines(path, text, (line) =>
-            line.includes(OLD_SPEC) && !line.startsWith("Formerly")
-              ? { rule: "old-spec", message: "old install spec; use github:heliowap/opencode-plugins#main::path:plugins/<name>" }
-              : undefined,
-          ),
-        )
-      }
-      if (text.includes(MASK) && !MASK_ALLOWED_PATHS.some((prefix) => path.startsWith(prefix))) {
-        out.push(
-          ...scanLines(path, text, (line) =>
-            line.includes(MASK) && !MASK_DESCRIPTION.test(line)
-              ? { rule: "redacted-literal", message: "literal mask text; restore the original value" }
-              : undefined,
-          ),
-        )
-      }
-      if (/^plugins\/[^/]+\/package\.json$/.test(path)) {
-        out.push(
-          ...scanLines(path, text, (line) =>
-            line.includes('"workspace:')
-              ? { rule: "workspace-dep", message: "workspace: protocol; each plugin must install alone" }
-              : undefined,
-          ),
-        )
-      }
-      return out
-    }),
+function scanFile(path: string, text: string): Finding[] {
+  const out: Finding[] = []
+  out.push(
+    ...scanLines(path, text, (line) =>
+      line.includes(OLD_SPEC) && !line.startsWith("Formerly")
+        ? { rule: "old-spec", message: `old install spec; use ${specFor("<name>")}` }
+        : undefined,
+    ),
   )
-  return [...found, ...perFile.flat()]
+  const maskAllowed = MASK_ALLOWED_PATHS.some((prefix) => path.startsWith(prefix))
+  if (!maskAllowed) {
+    out.push(
+      ...scanLines(path, text, (line) =>
+        line.includes(MASK) && !(path.endsWith(".md") && MASK_DESCRIPTION.test(line))
+          ? { rule: "redacted-literal", message: "literal mask text; restore the original value" }
+          : undefined,
+      ),
+    )
+  }
+  if (/^plugins\/[^/]+\/package\.json$/.test(path)) {
+    out.push(
+      ...scanLines(path, text, (line) =>
+        line.includes('"workspace:') ? { rule: "workspace-dep", message: "workspace: protocol; each plugin must install alone" } : undefined,
+      ),
+    )
+  }
+  return out
+}
+
+export async function lintRepo(root: string, options: Options = { staged: false }): Promise<Finding[]> {
+  const files = decode(await git(root, ["ls-files", "-z"])).split("\0").filter(Boolean)
+  const contents = await (options.staged ? stagedContents(root, files) : workingContents(root, files))
+  const read: Read = (path) => contents.get(path)
+  const scanned = files.flatMap((file) => scanFile(file, read(file) ?? ""))
+  return [...pluginShape(files, read), ...scanned]
 }
 
 if (import.meta.main) {
-  const findings = await lintRepo(process.argv[2] ?? join(import.meta.dir, ".."))
+  const args = process.argv.slice(2)
+  const findings = await lintRepo(args.find((arg) => !arg.startsWith("--")) ?? join(import.meta.dir, ".."), { staged: args.includes("--staged") })
   for (const finding of findings) console.log(formatFinding(finding))
   process.exit(findings.length === 0 ? 0 : 1)
 }
