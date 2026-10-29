@@ -56,16 +56,10 @@ Or list the specs in your OpenCode config:
 ## Development
 
 ```sh
-cd plugins/<name> && bun install && bun test
+bun install && bun run check
 ```
 
-Root checks (installer and CI matrix):
-
-```sh
-bun install --frozen-lockfile && bun run typecheck && bun test ./test
-```
-
-CI runs the root checks on every change. Each plugin job runs only when files under `plugins/<name>/` change. A change to the workflow or `scripts/ci-matrix.ts` runs all of them.
+Adding a plugin, host suites, install proofs, and evidence: [docs/development.md](docs/development.md).
 
 ## Issues
 

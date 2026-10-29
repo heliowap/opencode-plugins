@@ -31,24 +31,19 @@
 
 ## Prompts and text
 
-- Everything in the project is in English: code, identifiers, comments, prompts, tests, docs, commit messages, issues, and pull requests.
 - Prompts live in `templates/` with `{{placeholder}}` slots. Pass the objective through `escapeXml`, since it is user data inside `<objective>` tags.
 - `templates/continuation.md`, `budget_limit.md`, `objective_updated.md`, and the tool descriptions are adapted from OpenAI Codex under Apache-2.0. When you change them, keep `NOTICE` accurate.
 
-## Comments
-
-Keep a comment only for a non-obvious why, such as a host quirk. State the observed fact, and leave out guesses about causes.
-
 ## Tests
 
-- Test behavior: call `step`, `parseCommand`, and the prompt functions the way the plugin does, and assert against literal expected values with `toEqual`. For rendered templates, assert the filled slots with `toContain` on a literal line instead of pinning the whole template text.
+- For rendered templates, assert the filled slots with `toContain` on a literal line instead of pinning the whole template text.
 - Every reducer branch has a test. A new event or effect ships with its tests.
-- The checks that `bun run verify:changed` selects pass before every commit. `src/verify-plan.ts` is the single source of the selection rules; do not restate them elsewhere.
+- `bun run verify:changed` passes before every commit. `src/verify-plan.ts` is the single source of the selection rules; do not restate them elsewhere.
 - `bun run mutation` keeps a 100% mutation score on the files in `mutate` of `stryker.config.json`. Pure logic goes in one of those files. A surviving mutant means a missing test or redundant code: add the test, or delete the code. Do not exclude mutants.
 
 ## Host canaries
 
-Changes to `src/index.ts` or event handling need a host canary in `host/`. A canary starts a real `opencode serve` through `host/harness/host.ts` with a scripted fixture provider (`host/harness/fixture.ts`). Grade it on `host.stored(session)`, files on disk, and `host.fixture.agentRequests()`. Assert exact counts and values. A bug fix lands with a canary or unit test that fails before the fix. Add new canary files to the `goal-host` matrix in the repo root `.github/workflows/ci.yml`.
+Changes to `src/index.ts` or event handling need a canary in `host/`. A canary starts a real `opencode serve` through `host/harness/host.ts` with a scripted fixture provider (`host/harness/fixture.ts`). Grade it on `host.stored(session)`, files on disk, and `host.fixture.agentRequests()`. Assert exact counts and values. A bug fix lands with a canary or unit test that fails before the fix. Add new canary files to the `goal-host` matrix in the repo root `.github/workflows/ci.yml`.
 
 ## Manual end-to-end checks
 
