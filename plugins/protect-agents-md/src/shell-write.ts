@@ -495,9 +495,13 @@ const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: str
   // The remote command of ssh runs on another machine; only its local redirects count.
   if (cmd === "ssh") return false
   const names = (word: string) => NAMES.test(word)
-  // A shell's "-c" argument carries a nested command.
-  const cIndex = SHELL_CMDS.has(cmd) ? args.findIndex((arg) => arg === "-c") : -1
-  if (cIndex >= 0 && args[cIndex + 1] !== undefined && run(args[cIndex + 1]!)) return true
+  // A shell's "-c" argument carries a nested command, alone or inside a single-dash
+  // option cluster such as "-lc" or "-ec".
+  if (SHELL_CMDS.has(cmd)) {
+    for (const [index, arg] of args.entries()) {
+      if (/^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg) && args[index + 1] !== undefined && run(args[index + 1]!)) return true
+    }
+  }
   if (WRITER_NAMES.has(cmd) && args.some(names)) return true
   if (cmd === "xargs") {
     // xargs gets its arguments from the pipe: "… AGENTS.md | xargs rm" removes them.
