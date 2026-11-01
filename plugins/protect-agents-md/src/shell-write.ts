@@ -540,13 +540,29 @@ const shellText = (call: string): string => {
   return parts.length > 1 ? parts.map((part) => JSON.stringify(part)).join(" ") : call.trim()
 }
 
-// A write API call in script text flags only when its own path expression names AGENTS.md.
+// A name = "value" assignment inside script text; binds the identifiers a write API's path
+// expression may use instead of a literal.
+const SCRIPT_ASSIGN = /([A-Za-z_]\w*)\s*=\s*("[^"]*"|'[^']*'|[^\s;,()'"]*)/g
+
+// A write API call in script text flags only when its own path expression names AGENTS.md,
+// either literally or through an identifier the same script assigns an AGENTS.md value.
 const scriptFlags = (text: string, run: (inner: string) => boolean): boolean => {
-  for (const match of text.matchAll(METHOD_WRITE)) if (exprNames(match[1]!)) return true
-  for (const match of text.matchAll(RENAME_TARGET)) if (exprNames(match[1]!)) return true
-  for (const match of text.matchAll(OPEN_WRITE)) if (exprNames(match[1]!)) return true
-  for (const match of text.matchAll(PATH_WRITE)) if (exprNames(match[1]!)) return true
-  for (const match of text.matchAll(COPY_WRITE)) if (exprNames(match[1]!) || exprNames(match[2]!)) return true
+  let bindings: Map<string, string> | undefined
+  const boundNames = (expr: string): boolean => {
+    const ids = expr.replace(/"[^"]*"|'[^']*'/g, "").match(/[A-Za-z_]\w*/g)
+    if (ids === null) return false
+    bindings ??= new Map([...text.matchAll(SCRIPT_ASSIGN)].map((match) => [match[1]!, match[2]!]))
+    return ids.some((id) => {
+      const value = bindings!.get(id)
+      return value !== undefined && exprNames(value)
+    })
+  }
+  const names = (expr: string) => exprNames(expr) || boundNames(expr)
+  for (const match of text.matchAll(METHOD_WRITE)) if (names(match[1]!)) return true
+  for (const match of text.matchAll(RENAME_TARGET)) if (names(match[1]!)) return true
+  for (const match of text.matchAll(OPEN_WRITE)) if (names(match[1]!)) return true
+  for (const match of text.matchAll(PATH_WRITE)) if (names(match[1]!)) return true
+  for (const match of text.matchAll(COPY_WRITE)) if (names(match[1]!) || names(match[2]!)) return true
   for (const match of text.matchAll(SHELL_OUT)) if (run(shellText(match[1]!))) return true
   return false
 }
