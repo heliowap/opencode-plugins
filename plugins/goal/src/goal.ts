@@ -42,9 +42,8 @@ export const pauseOnRestart = (option: unknown): boolean => option === true
 
 const IDLE_DELAY_CAP_MS = 1_800_000
 
-// The wait after a no-progress turn doubles each time, capped at thirty minutes — never below the
-// configured base delay. `idleTurns` is the count before the turn that just ended.
-export const idleDelay = (base: number, idleTurns: number) =>
+// `idleTurns` is the count before the turn that just ended.
+const idleDelay = (base: number, idleTurns: number) =>
   Math.min(base * 2 ** idleTurns, Math.max(base, IDLE_DELAY_CAP_MS))
 
 // OpenCode reports HTTP statuses up to 599.

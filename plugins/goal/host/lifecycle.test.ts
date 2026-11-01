@@ -246,7 +246,7 @@ describe("lifecycle", () => {
         return /<goal_context>[\s\S]*?<\/goal_context>/.exec(system)?.[0]
       })
       expect(contexts).toHaveLength(3)
-      expect(contexts[0]).toBeDefined()
+      expect(contexts[0]).toContain("<goal_context>")
       expect(contexts[1]).toBe(contexts[0])
       // The goal settled, so the last request's system text carries no goal_context, while usage kept counting.
       expect(contexts[2]).toBeUndefined()
@@ -272,9 +272,10 @@ describe("lifecycle", () => {
       await host.until(() => starts.length >= 6, 60_000)
 
       // The first request is the goal's first turn; each later request waits idleTurns * 400 ms.
+      const bounds = [350, 750, 1550, 3150, 6350]
       const gaps = starts.slice(1).map((start, index) => start - starts[index]!)
       for (const [index, gap] of gaps.entries()) {
-        expect(gap).toBeGreaterThanOrEqual(400 * 2 ** index - 50)
+        expect(gap).toBeGreaterThanOrEqual(bounds[index]!)
       }
       await host.until(() => host!.stored(session)?.idleTurns === 6, 30_000)
       expect(host.stored(session)).toMatchObject({ status: "active", emptyTurns: 0 })

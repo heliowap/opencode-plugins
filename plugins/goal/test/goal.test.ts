@@ -517,7 +517,6 @@ describe("idle turns back off and wait for child sessions (#6)", () => {
       goal: active({ continueAt: 129_000, updatedAt: 9_000 }),
       effect: { _tag: "Cooldown", at: 129_000 },
     })
-    // The next idle turn backs off from the base delay again.
     expect(step(progress.goal, textOnly, 11_000)).toEqual({
       goal: active({ idleTurns: 1, continueAt: 131_000, updatedAt: 11_000 }),
       effect: { _tag: "Cooldown", at: 131_000 },
@@ -526,15 +525,15 @@ describe("idle turns back off and wait for child sessions (#6)", () => {
 
   test("the idle backoff is capped at thirty minutes", () => {
     expect(step(active({ idleTurns: 20 }), textOnly, T1)).toEqual({
-      goal: active({ idleTurns: 21, continueAt: T1 + 1_800_000, updatedAt: T1 }),
-      effect: { _tag: "Cooldown", at: T1 + 1_800_000 },
+      goal: active({ idleTurns: 21, continueAt: 1_802_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 1_802_000 },
     })
   })
 
   test("a configured base above the cap is never shortened", () => {
     expect(step(active(), { ...textOnly, delayMs: 3_600_000 }, T1)).toEqual({
-      goal: active({ idleTurns: 1, continueAt: T1 + 3_600_000, updatedAt: T1 }),
-      effect: { _tag: "Cooldown", at: T1 + 3_600_000 },
+      goal: active({ idleTurns: 1, continueAt: 3_602_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 3_602_000 },
     })
   })
 
@@ -576,8 +575,8 @@ describe("idle turns back off and wait for child sessions (#6)", () => {
 
   test("the last child ending schedules the continuation at the current idle delay", () => {
     expect(step(active({ idleTurns: 3 }), { _tag: "ChildEnded", running: 0, delayMs: 120_000 }, T1)).toEqual({
-      goal: active({ idleTurns: 3, continueAt: T1 + 960_000, updatedAt: T1 }),
-      effect: { _tag: "Cooldown", at: T1 + 960_000 },
+      goal: active({ idleTurns: 3, continueAt: 962_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 962_000 },
     })
   })
 

@@ -78,7 +78,6 @@ test("ending clears calls, restarting refreshes activity, and deleting untracks 
     ["child", { parentID: "parent", running: false, lastActivity: 10, openCalls: new Set(), ended: true }],
     ["other", { parentID: "another", running: true, lastActivity: 50, openCalls: new Set(), ended: false }],
   ]), stalls: [] })
-  // Starting an ended child makes it live again.
   expect(watch(ended.children, { _tag: "Started", sessionID: "child" }, 150, 1500).children.get("child")).toEqual(
     { parentID: "parent", running: true, lastActivity: 150, openCalls: new Set(), ended: false },
   )
