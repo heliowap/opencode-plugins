@@ -22,9 +22,14 @@ const read = (path: string) => {
     return undefined
   }
 }
-// The file-contains check the adapter builds from the input's target paths.
-const contains = (tool: string, input: unknown) => (text: string) =>
-  targetPaths(tool, input).some((path) => read(resolve(dir, path))?.includes(text) ?? false)
+// Mirrors the adapter: the input's target paths feed both the file-contains
+// check and the restore call.
+const restore = (tool: string, input: unknown, lookup = masker.lookup) => {
+  const paths = targetPaths(tool, input)
+  return restoreInput(paths, input, lookup, (text) =>
+    paths.some((path) => read(resolve(dir, path))?.includes(text) ?? false),
+  )
+}
 
 test("an edit copying a masked line as context is restored, and the file keeps the secret", () => {
   const masked = masker.redactText(readFileSync(file, "utf8"))
@@ -34,7 +39,7 @@ test("an edit copying a masked line as context is restored, and the file keeps t
     oldString: `SECRET_TOKEN=${PLACEHOLDER}\nthird line`,
     newString: `SECRET_TOKEN=${PLACEHOLDER}\nchanged line`,
   }
-  const result = restoreInput(input, masker.lookup, contains("edit", input))
+  const result = restore("edit", input)
   expect(result).toEqual({
     ok: true,
     input: {
@@ -52,7 +57,7 @@ test("an edit copying a masked line as context is restored, and the file keeps t
 test("a write whose content has [REDACTED] for a file that lacks it is rejected", () => {
   const target = join(dir, "new.txt")
   const input = { path: target, content: "API_KEY=[REDACTED]\n" }
-  const result = restoreInput(input, masker.lookup, contains("write", input))
+  const result = restore("write", input)
   expect(result).toEqual({
     ok: false,
     message:
@@ -62,7 +67,7 @@ test("a write whose content has [REDACTED] for a file that lacks it is rejected"
 
 test("a placeholder with an unknown id is rejected the same way", () => {
   const input = { path: file, oldString: "SECRET_TOKEN=[REDACTED:deadbeef]", newString: "x" }
-  const result = restoreInput(input, masker.lookup, contains("edit", input))
+  const result = restore("edit", input)
   expect(result).toEqual({
     ok: false,
     message:
@@ -74,7 +79,7 @@ test("a placeholder that the target file already contains is left as a literal",
   const legacy = join(dir, "legacy.txt")
   writeFileSync(legacy, "API_KEY=[REDACTED] and [REDACTED:deadbeef]\n")
   const input = { path: legacy, content: "kept: [REDACTED] and [REDACTED:deadbeef]\n" }
-  const result = restoreInput(input, masker.lookup, contains("write", input))
+  const result = restore("write", input)
   expect(result).toEqual({ ok: true, input: { path: legacy, content: "kept: [REDACTED] and [REDACTED:deadbeef]\n" } })
 })
 
@@ -90,13 +95,48 @@ test("a patch input has known placeholders restored in the patch text", () => {
   const input = {
     patchText: `*** Begin Patch\n*** Update File: note.txt\n@@\n-SECRET_TOKEN=${PLACEHOLDER}\n+SECRET_TOKEN=${PLACEHOLDER} suffix\n*** End Patch\n`,
   }
-  const result = restoreInput(input, masker.lookup, contains("patch", input))
+  const result = restore("patch", input)
   expect(result).toEqual({
     ok: true,
     input: {
       patchText: `*** Begin Patch\n*** Update File: note.txt\n@@\n-SECRET_TOKEN=${SECRET}\n+SECRET_TOKEN=${SECRET} suffix\n*** End Patch\n`,
     },
   })
+})
+
+// The value of a path-valued credential (GOOGLE_APPLICATION_CREDENTIALS and
+// friends) is collected as a secret, so the model sees the placeholder where
+// the file location belongs.
+const PATH_PLACEHOLDER = "[REDACTED:0dcd3a2c]"
+const pathMasker = createMasker({ secrets: ["/vault/gcp/service-account.json"], key: KEY })
+const pathRejection = {
+  ok: false,
+  message:
+    'Edit input contains the placeholder "[REDACTED:0dcd3a2c]", which cannot be resolved. Re-read the lines you want to change and write the edit again without the placeholder.',
+} as const
+
+test("a path field holding a placeholder is rejected, never resolved", () => {
+  expect(pathMasker.redactText("credentials=/vault/gcp/service-account.json")).toBe(`credentials=${PATH_PLACEHOLDER}`)
+  const input = { filePath: PATH_PLACEHOLDER, content: "clobbered\n" }
+  expect(restore("write", input, pathMasker.lookup)).toEqual(pathRejection)
+})
+
+test("a patch header path holding a placeholder is rejected even when a target file contains the token", () => {
+  writeFileSync(join(dir, "hasmask.txt"), `note ${PATH_PLACEHOLDER}\n`)
+  const input = {
+    patchText: `*** Begin Patch\n*** Update File: ${PATH_PLACEHOLDER}\n*** Update File: hasmask.txt\n*** End Patch\n`,
+  }
+  expect(restore("patch", input, pathMasker.lookup)).toEqual(pathRejection)
+})
+
+test("a unified diff header path holding a placeholder is rejected", () => {
+  const input = { patchText: `--- a/${PATH_PLACEHOLDER}\n+++ b/${PATH_PLACEHOLDER}\n@@ -1 +1 @@\n` }
+  expect(restore("patch", input, pathMasker.lookup)).toEqual(pathRejection)
+})
+
+test("a placeholder nested under a path key is not resolved", () => {
+  const input = { path: "note.txt", edits: [{ path: PATH_PLACEHOLDER, newString: "x" }] }
+  expect(restore("edit", input, pathMasker.lookup)).toEqual(pathRejection)
 })
 
 test("the same value always gets the same id within a masker", () => {
