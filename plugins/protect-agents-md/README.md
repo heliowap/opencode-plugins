@@ -58,18 +58,22 @@ There is no automatic approval based on an agent's answer.
   of asking, so an auto-accepting client cannot approve the edit for you.
 - **Shell reads.** Every other command runs, including chains such as
   `cd repo && git log -- AGENTS.md`, `find . -name AGENTS.md`, and queries
-  that mention the name as data. The match is textual and ignores quoting, so
-  a quoted `>` or writer name next to `AGENTS.md` is still denied, while a
-  write whose target the text does not show (a path computed at runtime, a
-  script file) is not caught; use the process guard for that.
+  that mention the name as data. Commands are tokenized, so a writer word or
+  the name inside a quoted argument (a grep pattern, an echo string) does not
+  count: only a writer's own arguments, a write API's path expression, or a
+  redirect target can name the file. The remote command of `ssh` is not
+  inspected, since it writes on another machine. If a command cannot be
+  parsed the match falls back to a textual scan, and a write whose target the
+  text does not show (a path computed at runtime, a script file) is not
+  caught either way; use the process guard for that.
   A recognized read does not override other OpenCode permission rules or
   approve later writes.
 
 ## OpenCode limitations
 
-- Shell matching is textual, with a bounded exception for supported reads.
-  It is not a shell sandbox. The exception assumes standard executables and
-  trusted inherited environment and configuration. Git diff helpers and
+- Shell matching parses each command and falls back to a textual scan when
+  parsing fails. It is not a shell sandbox. It assumes standard executables
+  and trusted inherited environment and configuration. Git diff helpers and
   text conversion can run configured programs.
 - Commands such as `/init` that create or update `AGENTS.md` also need your
   `Yes`.
