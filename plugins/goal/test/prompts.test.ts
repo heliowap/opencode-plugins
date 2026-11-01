@@ -55,10 +55,12 @@ test("templates load through a preserved source-directory symlink", () => {
     )
     expect({ exitCode: result.exitCode, stderr: result.stderr.toString() }).toEqual({ exitCode: 0, stderr: "" })
     const prompts = JSON.parse(result.stdout.toString()) as string[]
-    for (const prompt of prompts) {
+    expect(prompts).toHaveLength(4)
+    // The continuation no longer repeats the objective (#7); the other prompts still carry it.
+    expect(prompts[0]).not.toContain("<objective>")
+    for (const prompt of prompts.slice(1)) {
       expect(prompt).toContain("<objective>\nfix &lt;/objective&gt; injection &amp; &lt;b&gt;\n</objective>")
     }
-    expect(prompts).toHaveLength(4)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -68,11 +70,19 @@ test("render fills known placeholders and leaves unknown ones", () => {
   expect(render("{{a}} and {{b}}", { a: "x" })).toBe("x and {{b}}")
 })
 
-test("continuation escapes the objective and reports the budget", () => {
+test("continuation stays under 600 chars, carries only per-turn data, and points at the rules (#7)", () => {
   const prompt = continuationPrompt(goal, 0)
-  expect(prompt).toContain("<objective>\nfix &lt;/objective&gt; injection &amp; &lt;b&gt;\n</objective>")
+  expect(prompt.length).toBeLessThanOrEqual(600)
+  expect(prompt).toContain("Continue working toward the active session goal.")
   expect(prompt).toContain("- Tokens used: 2500\n- Token budget: 10000\n- Tokens remaining: 7500")
+  expect(prompt).toContain("<goal_context>")
+  expect(prompt).not.toContain("<objective>")
+  expect(prompt).not.toContain("fix &lt;/objective&gt; injection")
   expect(prompt).not.toContain("{{")
+})
+
+test("a one-line objective keeps the rendered continuation small", () => {
+  expect(continuationPrompt({ ...goal, objective: "continue", verify: "bun test" }, 0).length).toBeLessThanOrEqual(600)
 })
 
 test("continuation without a budget says unbounded", () => {
@@ -174,16 +184,45 @@ test("status text shows the verify command and its failed checks", () => {
   expect(statusText({ ...verified, verifyFailures: 1, lastExitCode: 3 }, 0)).toContain("Verify: bun test <unit> · 1 failed check, last exit code 3")
 })
 
-test("continuation and session context name the escaped verify command", () => {
+test("continuation names the verify command; session context states its rule once (#7)", () => {
   const rule =
     'The user set a verify command: `bun test &lt;unit&gt;`. goal_update with status "complete" runs it in the goal\'s directory and keeps the goal open unless it exits 0.'
-  expect(continuationPrompt(verified, 0)).toContain(`- Tokens remaining: 7500\n\nVerification:\n${rule}\n\nWork from evidence:`)
+  const continuation = continuationPrompt(verified, 0)
+  expect(continuation).toContain("- Tokens remaining: 7500\n- Verify command: `bun test &lt;unit&gt;`")
+  expect(continuation).not.toContain(rule)
   expect(sessionContext(verified, 0)).toContain(`</objective>\n\nVerification:\n${rule}\n\nKeep working`)
 })
 
 test("without a verify command the prompts say nothing about verification", () => {
-  expect(continuationPrompt(goal, 0)).toContain("- Tokens remaining: 7500\n\nWork from evidence:")
+  const continuation = continuationPrompt(goal, 0)
+  expect(continuation).toContain("- Tokens remaining: 7500\n\n")
+  expect(continuation).not.toContain("Verify")
   expect(sessionContext(goal, 0)).toContain("</objective>\n\nKeep working")
+})
+
+test("each audit rule lives in exactly one template (#7)", () => {
+  const renders = [continuationPrompt, budgetLimitPrompt, objectiveUpdatedPrompt, sessionContext].map((render) =>
+    render(verified, 0),
+  )
+  for (const rule of [
+    "Continuation behavior:",
+    "Work from evidence:",
+    "No-progress check:",
+    "Progress visibility:",
+    "Fidelity:",
+    "Completion audit:",
+    "Blocked audit:",
+    "Statuses:",
+    "- `complete`: every requirement",
+    "- `blocked`: no remaining requirement",
+    "- `paused`: only when the user asks",
+    "Call goal_update only after the completion or blocked audit passes",
+    "The user set a verify command:",
+  ]) {
+    const carriers = renders.filter((text) => text.includes(rule))
+    expect(carriers).toHaveLength(1)
+    expect(sessionContext(verified, 0)).toContain(rule)
+  }
 })
 
 test("a failed check tells the model the exit code and the end of the output", () => {
@@ -207,8 +246,8 @@ test("a failed check with no output says so", () => {
   )
 })
 
-test("continuation defines each status the model can set", () => {
-  const prompt = continuationPrompt(goal, 0)
+test("session context defines each status the model can set", () => {
+  const prompt = sessionContext(goal, 0)
   expect(prompt).toContain(
     "- `complete`: every requirement of the objective is met and verified. Work that is done except for blocked parts is not complete.",
   )
