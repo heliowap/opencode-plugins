@@ -278,8 +278,21 @@ export default Plugin.define({
         Effect.sync(() => {
           const result = watch(watchdog.children, event, now(), stallMs)
           watchdog.children = result.children
-          return result.stalls
-        }).pipe(Effect.flatMap((stalls) => Effect.forEach(stalls, stalled, { discard: true })))
+          return result
+        }).pipe(
+          Effect.flatMap((result) =>
+            Effect.forEach(result.stalls, stalled, { discard: true }).pipe(
+              // An expired child reports no end of its own, so its expiry is the parent's ChildEnded.
+              Effect.andThen(
+                Effect.forEach(
+                  result.expired,
+                  (child) => onEvent(child.parentID, { _tag: "ChildEnded", running: liveChildren(child.parentID), delayMs: cooldownMs }),
+                  { discard: true },
+                ),
+              ),
+            ),
+          ),
+        )
 
       // A session that ends (or is deleted) can leave warned calls whose result never arrives.
       const forgetWarnings = (sessionID: string) =>

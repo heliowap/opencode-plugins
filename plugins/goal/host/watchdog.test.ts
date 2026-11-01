@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { afterToolResult, mentions, toolResults, type ChatRequest, type Script } from "./harness/fixture.ts"
+import { afterToolResult, CONTINUATION, count, mentions, toolResults, type ChatRequest, type Script } from "./harness/fixture.ts"
 import { Host } from "./harness/host.ts"
 
 const TIMEOUT = 120_000
@@ -56,6 +56,37 @@ describe("watchdog", () => {
       // finish, so a stall during that call would already have produced the notice.
       const last = host.fixture.agentRequests().at(-1)!
       expect(toolResults(last).filter((result) => result.includes("child done"))).toHaveLength(1)
+      expect(host.fixture.requests.filter((request) => mentions(request, WATCHDOG))).toHaveLength(0)
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "W3 a child session that never starts still lets the parent continue",
+    async () => {
+      const script: Script = (request) => {
+        if (afterToolResult(request)) return { text: "Parent done." }
+        return count(request, CONTINUATION) === 1
+          ? { text: "Parent working." }
+          : { tool: "goal_update", args: { status: "complete", note: "moved on" } }
+      }
+      host = await Host.start({
+        allowAll: true,
+        pluginOptions: { watchdogStallMs: 1500, continuationDelayMs: 400 },
+        script,
+      })
+      const session = await host.session()
+      // The child is created but never prompted, so it never starts or ends.
+      await host.session("build", session.id)
+      await host.goal(session, "wait for a child that never starts")
+
+      // The watchdog expires the silent child after ~1.5 s and its ChildEnded resumes the parent;
+      // without it the goal could not continue for another thirty minutes.
+      await host.until(() => host!.stored(session)?.status === "complete")
+      await host.settle(session)
+
+      expect(host.stored(session)).toMatchObject({ status: "complete", note: "moved on" })
+      expect(host.fixture.agentRequests()).toHaveLength(3)
       expect(host.fixture.requests.filter((request) => mentions(request, WATCHDOG))).toHaveLength(0)
     },
     TIMEOUT,
