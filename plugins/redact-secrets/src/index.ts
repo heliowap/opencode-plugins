@@ -1,6 +1,26 @@
 import { Plugin } from "@opencode/plugin"
 import { randomBytes } from "node:crypto"
+import { readdirSync, readFileSync } from "node:fs"
+import { join } from "node:path"
+import { dotenvSecrets, isDotenvFile } from "./dotenv.ts"
 import { createMasker, isEnvSecretName, isPlainObject, MIN_SECRET_LENGTH } from "./redact.ts"
+
+// Values from .env and .env.* in the session directory are known secrets too.
+const dotenvValues = (directory: string): string[] => {
+  try {
+    return readdirSync(directory)
+      .filter(isDotenvFile)
+      .flatMap((name) => {
+        try {
+          return dotenvSecrets(readFileSync(join(directory, name), "utf8"))
+        } catch {
+          return []
+        }
+      })
+  } catch {
+    return []
+  }
+}
 
 // Masks credentials in tool results before the model sees them or the session stores them.
 export default Plugin.define({
@@ -9,6 +29,7 @@ export default Plugin.define({
     const secrets = Object.entries(process.env)
       .filter(([name, value]) => isEnvSecretName(name) && (value?.length ?? 0) >= MIN_SECRET_LENGTH)
       .map(([, value]) => value as string)
+      .concat(dotenvValues(ctx.location.directory))
     const masker = createMasker({ secrets, key: randomBytes(32) })
 
     await ctx.tool.hook("execute.after", (event) => {

@@ -27,6 +27,27 @@ test.each([
   expect(masker.redactText(line)).toBe(masked)
 })
 
+// The leaked shapes from issue #10: wider key names, a key that is not the last
+// segment, and a credential inside a URL's userinfo.
+test.each([
+  ["SMTP_PASS=synthetic-smtp-value-123", "SMTP_PASS=[REDACTED:cab746b5]"],
+  ["APP_CRYPT_KEY=synthetic-crypt-value-123", "APP_CRYPT_KEY=[REDACTED:159296b8]"],
+  ["CERT_PASSWORD_ENCRYPTION_KEY=synthetic-enc-value-123", "CERT_PASSWORD_ENCRYPTION_KEY=[REDACTED:9bc8f169]"],
+  ["DB_PASSWORD=synthetic-db-value-789", "DB_PASSWORD=[REDACTED:45a918e4]"],
+])("masks the wider field %j", (line, masked) => {
+  expect(masker.redactText(line)).toBe(masked)
+})
+
+test("masks the password in a URL's userinfo and keeps user and host", () => {
+  expect(masker.redactText(`DATABASE_URL="mysql://root:synthetic-db-pass@127.0.0.1:3306/app"`)).toBe(
+    `DATABASE_URL="mysql://root:[REDACTED:7d38f5fc]@127.0.0.1:3306/app"`,
+  )
+})
+
+test.each(["PORT=3000", "NODE_ENV=production"])("leaves the non-secret key %j unchanged", (line) => {
+  expect(masker.redactText(line)).toBe(line)
+})
+
 const withSecret = createMasker({ secrets: ["env-secret-abcdef1234"], key: KEY })
 
 test("a known secret value is masked wherever it appears", () => {

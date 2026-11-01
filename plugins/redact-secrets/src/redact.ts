@@ -6,9 +6,9 @@ export const MIN_SECRET_LENGTH = 12
 const ENV_NAME = /(API_?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)/i
 export const isEnvSecretName = (name: string): boolean => ENV_NAME.test(name)
 
-// Field keys that mark a credential: the whole key must be one of these names, so
-// substrings inside longer identifiers (knownSecret, sessionToken) never match.
-const FIELD_KEY = /^(?:api_?key|authorization|password|secret|(?:access_?|refresh_?|auth_?|id_?)?token)$/i
+// A key marks a credential when its name contains one of these words anywhere
+// (SMTP_PASS, CERT_PASSWORD_ENCRYPTION_KEY), not only as the whole name.
+const FIELD_KEY = /(?:KEY|PASS|PWD|SECRET|TOKEN|CRYPT|PRIVATE|CREDENTIAL|AUTH)/i
 export const isSecretFieldKey = (name: string): boolean => FIELD_KEY.test(name)
 
 const SYNTAX = /[\s"'`,;{}()[\]]/
@@ -26,6 +26,9 @@ export const isLiteralValue = (value: string): boolean =>
 // A "key"[:=] "value" candidate. The key is a whole identifier (the left prefix is a
 // non-word character or the start), so a match never begins inside a longer name.
 const SECRET_FIELD = /(^|[^\w$])(["']?)([\w$]+)\2(\s*[:=]\s*)(["']?)((?:Bearer\s+)?[^\s"'`,;}]{8,})/gi
+
+// scheme://user:password@ — the password part of a URL's userinfo.
+const URL_CREDENTIAL = /([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)([^\s'"`/:?#@[\]]+):([^\s'"`@/?#[\]]+)@/g
 
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 export const isPlainObject = (value: unknown): value is Record<string, unknown> =>
@@ -50,16 +53,20 @@ export const createMasker = (options: { readonly secrets: readonly string[]; rea
   }
 
   const redactText = (text: string) =>
-    (known ? text.replace(known, placeholder) : text).replace(
-      SECRET_FIELD,
-      (match, lead: string, quote: string, key: string, separator: string, valueQuote: string, value: string) => {
-        if (!isSecretFieldKey(key)) return match
-        const bearer = value.match(/^Bearer\s+/i)?.[0] ?? ""
-        const secret = value.slice(bearer.length)
-        if (!isLiteralValue(secret)) return match
-        return `${lead}${quote}${key}${quote}${separator}${valueQuote}${bearer}${placeholder(secret)}`
-      },
-    )
+    (known ? text.replace(known, placeholder) : text)
+      .replace(
+        SECRET_FIELD,
+        (match, lead: string, quote: string, key: string, separator: string, valueQuote: string, value: string) => {
+          if (!isSecretFieldKey(key)) return match
+          const bearer = value.match(/^Bearer\s+/i)?.[0] ?? ""
+          const secret = value.slice(bearer.length)
+          if (!isLiteralValue(secret)) return match
+          return `${lead}${quote}${key}${quote}${separator}${valueQuote}${bearer}${placeholder(secret)}`
+        },
+      )
+      .replace(URL_CREDENTIAL, (match, scheme: string, user: string, password: string) =>
+        isLiteralValue(password) ? `${scheme}${user}:${placeholder(password)}@` : match,
+      )
 
   const redact = (value: unknown): unknown => {
     if (typeof value === "string") return redactText(value)
