@@ -5,6 +5,7 @@ const shell = (command: string) => ({ command })
 
 test("only shell commands are extracted and trimmed", () => {
   expect(shellCommand("shell", { command: " \n git status \t" })).toEqual("git status")
+  expect(shellCommand("bash", { command: " git status " })).toEqual("git status")
   expect(shellCommand("shell", { command: " \n " })).toEqual("")
   expect(shellCommand("read", { command: "git status" })).toEqual(undefined)
   for (const input of [undefined, null, "git status", {}, { command: 1 }]) {
@@ -29,6 +30,15 @@ test("a run warns only on its third identical shell command", () => {
   })
   expect(empty).toEqual(new Map())
   expect(first.streaks).toEqual(new Map([["one", { command: "git status", count: 1 }]]))
+})
+
+test("the bash tool builds the same streak as shell", () => {
+  const first = loopStep(new Map(), "one", "bash", shell("git status"))
+  const second = loopStep(first.streaks, "one", "bash", shell("git status"))
+  expect(loopStep(second.streaks, "one", "bash", shell("git status"))).toEqual({
+    streaks: new Map([["one", { command: "git status", count: 3 }]]),
+    warn: true,
+  })
 })
 
 test("whitespace-only differences in shell commands continue the same run", () => {

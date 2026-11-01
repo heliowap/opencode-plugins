@@ -14,7 +14,7 @@ export const PROGRESS_TOOLS: ReadonlySet<string> = new Set([...MUTATING_TOOLS, "
 
 export const shellCommand = (tool: string, input: unknown): string | undefined => {
   const command = (input as { command?: unknown } | null | undefined)?.command
-  return tool === "shell" && typeof command === "string" ? command.trim() : undefined
+  return (tool === "shell" || tool === "bash") && typeof command === "string" ? command.trim() : undefined
 }
 
 const shellCall = (streaks: Streaks, sessionID: string, command: string) => {
