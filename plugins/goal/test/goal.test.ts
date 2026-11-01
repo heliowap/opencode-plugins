@@ -10,13 +10,15 @@ const active = (patch: Partial<Goal> = {}): Goal => ({
   tokenBudget: null,
   tokensUsed: 0,
   emptyTurns: 0,
+  idleTurns: 0,
   directory: "/repo",
   createdAt: T0,
   updatedAt: T0,
   ...patch,
 })
 
-const turn = (activity: boolean, planning = false) => ({ _tag: "TurnEnded", activity, planning, delayMs: 120_000 }) as const
+const turn = (activity: boolean, planning = false) =>
+  ({ _tag: "TurnEnded", activity, progress: activity, waiting: false, planning, delayMs: 120_000 }) as const
 
 describe("set and edit", () => {
   test("Set creates an active goal and starts it", () => {
@@ -45,7 +47,7 @@ describe("set and edit", () => {
   })
 
   test("Edit keeps usage and steers the active turn", () => {
-    expect(step(active({ tokensUsed: 900, emptyTurns: 2 }), { _tag: "Edit", objective: "narrower" }, T1)).toEqual({
+    expect(step(active({ tokensUsed: 900, emptyTurns: 2, idleTurns: 5 }), { _tag: "Edit", objective: "narrower" }, T1)).toEqual({
       goal: active({ objective: "narrower", tokensUsed: 900, updatedAt: T1 }),
       effect: { _tag: "ObjectiveUpdated" },
     })
@@ -84,7 +86,7 @@ describe("set and edit", () => {
 
 describe("continuation", () => {
   test("the default cooldown is two minutes, and a configured wait is honored", () => {
-    expect(step(active(), { _tag: "TurnEnded", activity: true, planning: false }, T1)).toEqual({
+    expect(step(active(), { _tag: "TurnEnded", activity: true, progress: true, waiting: false, planning: false }, T1)).toEqual({
       goal: active({ continueAt: 122_000, updatedAt: T1 }),
       effect: { _tag: "Cooldown", at: 122_000 },
     })
@@ -134,14 +136,14 @@ describe("continuation", () => {
 
   test("an empty turn still continues while under the limit", () => {
     expect(step(active({ emptyTurns: 1 }), turn(false), T1)).toEqual({
-      goal: active({ emptyTurns: 2, continueAt: 122_000, updatedAt: T1 }),
+      goal: active({ emptyTurns: 2, idleTurns: 1, continueAt: 122_000, updatedAt: T1 }),
       effect: { _tag: "Cooldown", at: 122_000 },
     })
   })
 
   test("the third empty turn in a row blocks the goal", () => {
-    expect(step(active({ emptyTurns: 2 }), turn(false), T1)).toEqual({
-      goal: active({ emptyTurns: 3, status: "blocked", note: "3 consecutive turns produced no visible text or file edits. Run /goal resume to continue.", updatedAt: T1 }),
+    expect(step(active({ emptyTurns: 2, idleTurns: 2 }), turn(false), T1)).toEqual({
+      goal: active({ emptyTurns: 3, idleTurns: 3, status: "blocked", note: "3 consecutive turns produced no visible text or progress. Run /goal resume to continue.", updatedAt: T1 }),
       effect: { _tag: "None" },
     })
   })
@@ -485,6 +487,108 @@ describe("refused goal_update transitions name the next action (#9)", () => {
   })
 })
 
+describe("idle turns back off and wait for child sessions (#6)", () => {
+  // A turn with text but no progress tool is not empty, yet still idles.
+  const textOnly = { _tag: "TurnEnded", activity: true, progress: false, waiting: false, planning: false, delayMs: 120_000 } as const
+
+  test("three text-only turns double the delay, and a turn with progress resets it", () => {
+    const first = step(active(), textOnly, T1)
+    expect(first).toEqual({
+      goal: active({ idleTurns: 1, continueAt: 122_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 122_000 },
+    })
+    const second = step(first.goal, textOnly, 3_000)
+    expect(second).toEqual({
+      goal: active({ idleTurns: 2, continueAt: 243_000, updatedAt: 3_000 }),
+      effect: { _tag: "Cooldown", at: 243_000 },
+    })
+    const third = step(second.goal, textOnly, 5_000)
+    expect(third).toEqual({
+      goal: active({ idleTurns: 3, continueAt: 485_000, updatedAt: 5_000 }),
+      effect: { _tag: "Cooldown", at: 485_000 },
+    })
+    const fourth = step(third.goal, textOnly, 7_000)
+    expect(fourth).toEqual({
+      goal: active({ idleTurns: 4, continueAt: 967_000, updatedAt: 7_000 }),
+      effect: { _tag: "Cooldown", at: 967_000 },
+    })
+    const progress = step(fourth.goal, turn(true), 9_000)
+    expect(progress).toEqual({
+      goal: active({ continueAt: 129_000, updatedAt: 9_000 }),
+      effect: { _tag: "Cooldown", at: 129_000 },
+    })
+    // The next idle turn backs off from the base delay again.
+    expect(step(progress.goal, textOnly, 11_000)).toEqual({
+      goal: active({ idleTurns: 1, continueAt: 131_000, updatedAt: 11_000 }),
+      effect: { _tag: "Cooldown", at: 131_000 },
+    })
+  })
+
+  test("the idle backoff is capped at thirty minutes", () => {
+    expect(step(active({ idleTurns: 20 }), textOnly, T1)).toEqual({
+      goal: active({ idleTurns: 21, continueAt: T1 + 1_800_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: T1 + 1_800_000 },
+    })
+  })
+
+  test("a configured base above the cap is never shortened", () => {
+    expect(step(active(), { ...textOnly, delayMs: 3_600_000 }, T1)).toEqual({
+      goal: active({ idleTurns: 1, continueAt: T1 + 3_600_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: T1 + 3_600_000 },
+    })
+  })
+
+  test("a stored goal without idleTurns counts its first idle turn", () => {
+    const { idleTurns: _idle, ...legacy } = active()
+    expect(step(legacy, textOnly, T1)).toEqual({
+      goal: active({ idleTurns: 1, continueAt: 122_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 122_000 },
+    })
+  })
+
+  test("no continuation runs while a child session is running, and exactly one follows its end", () => {
+    const waiting = step(active({ emptyTurns: 2, continueAt: 130_000 }), { ...turn(true), waiting: true }, T1)
+    expect(waiting).toEqual({ goal: active({ updatedAt: T1 }), effect: { _tag: "None" } })
+    const ended = step(waiting.goal, { _tag: "ChildEnded", running: 0, delayMs: 120_000 }, 3_000)
+    expect(ended).toEqual({
+      goal: active({ continueAt: 123_000, updatedAt: 3_000 }),
+      effect: { _tag: "Cooldown", at: 123_000 },
+    })
+    expect(step(ended.goal, { _tag: "ContinueDue", at: 123_000 }, 123_000)).toEqual({
+      goal: active({ updatedAt: 123_000 }),
+      effect: { _tag: "Continue" },
+    })
+  })
+
+  test("a waiting turn that made no progress still counts the idle turn", () => {
+    expect(step(active(), { ...turn(true), progress: false, waiting: true }, T1)).toEqual({
+      goal: active({ idleTurns: 1, updatedAt: T1 }),
+      effect: { _tag: "None" },
+    })
+  })
+
+  test("the third empty turn still blocks while a child session is running", () => {
+    expect(step(active({ emptyTurns: 2, idleTurns: 2 }), { ...turn(false), waiting: true }, T1)).toEqual({
+      goal: active({ emptyTurns: 3, idleTurns: 3, status: "blocked", note: "3 consecutive turns produced no visible text or progress. Run /goal resume to continue.", updatedAt: T1 }),
+      effect: { _tag: "None" },
+    })
+  })
+
+  test("the last child ending schedules the continuation at the current idle delay", () => {
+    expect(step(active({ idleTurns: 3 }), { _tag: "ChildEnded", running: 0, delayMs: 120_000 }, T1)).toEqual({
+      goal: active({ idleTurns: 3, continueAt: T1 + 960_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: T1 + 960_000 },
+    })
+  })
+
+  test("a child ending while siblings still run does nothing", () => {
+    expect(step(active(), { _tag: "ChildEnded", running: 1, delayMs: 120_000 }, T1)).toEqual({
+      goal: active(),
+      effect: { _tag: "None" },
+    })
+  })
+})
+
 describe("interruptions and failures", () => {
   test("a user interrupt pauses the goal", () => {
     expect(step(active(), { _tag: "Interrupted", reason: "user" }, T1).goal).toEqual(
@@ -573,11 +677,11 @@ describe("interruptions and failures", () => {
       goal: active({ continueAt: 122_000, updatedAt: T1 }),
       effect: { _tag: "Cooldown", at: 122_000 },
     })
-    expect(step(active({ failedTurns: 2 }), turn(false), T1).goal).toEqual(active({ emptyTurns: 1, continueAt: 122_000, updatedAt: T1 }))
+    expect(step(active({ failedTurns: 2 }), turn(false), T1).goal).toEqual(active({ emptyTurns: 1, idleTurns: 1, continueAt: 122_000, updatedAt: T1 }))
   })
 
   test("resume clears the failure streak", () => {
-    expect(step(active({ status: "blocked", failedTurns: 3, note: "x" }), { _tag: "Resume" }, T1)).toEqual({
+    expect(step(active({ status: "blocked", failedTurns: 3, idleTurns: 4, note: "x" }), { _tag: "Resume" }, T1)).toEqual({
       goal: active({ updatedAt: T1 }),
       effect: { _tag: "Continue" },
     })
@@ -635,6 +739,11 @@ describe("decodeGoal", () => {
     expect(decodeGoal(active({ status }))).toEqual(active({ status }))
   })
 
+  test("accepts a stored goal written before idle turns existed", () => {
+    const { idleTurns: _idle, ...legacy } = active()
+    expect(decodeGoal(legacy)).toEqual(legacy)
+  })
+
   test("rejects malformed or old-format storage", () => {
     expect(decodeGoal({ objective: "x", status: "active", turnBudget: 5, turnsUsed: 1 })).toBeUndefined()
   })
@@ -655,7 +764,8 @@ describe("rejected transitions leave the goal unchanged", () => {
     ["a shutdown interrupt on an active goal", active(), { _tag: "Interrupted", reason: "shutdown" }],
     ["an inactivity interrupt on an active goal", active(), { _tag: "Interrupted", reason: "inactivity" }],
     ["Failed on a paused goal", paused, { _tag: "Failed", message: "boom" }],
-    ["TurnEnded on a paused goal", paused, { _tag: "TurnEnded", activity: false, planning: false }],
+    ["TurnEnded on a paused goal", paused, { _tag: "TurnEnded", activity: false, progress: false, waiting: false, planning: false }],
+    ["ChildEnded on a blocked goal", blocked, { _tag: "ChildEnded", running: 0 }],
   ] as const)("%s", (_name, goal, event) => {
     expect(step(goal, event, T1)).toEqual({ goal, effect: { _tag: "None" } })
   })
@@ -700,10 +810,11 @@ describe("user controls on goals that cannot take them", () => {
 
   test("events from the session are ignored without a goal", () => {
     expect(step(undefined, { _tag: "Usage", tokens: 10, closing: false }, T1)).toEqual({ goal: undefined, effect: { _tag: "None" } })
-    expect(step(undefined, { _tag: "TurnEnded", activity: true, planning: false }, T1)).toEqual({
+    expect(step(undefined, { _tag: "TurnEnded", activity: true, progress: true, waiting: false, planning: false }, T1)).toEqual({
       goal: undefined,
       effect: { _tag: "None" },
     })
+    expect(step(undefined, { _tag: "ChildEnded", running: 0 }, T1)).toEqual({ goal: undefined, effect: { _tag: "None" } })
   })
 })
 
