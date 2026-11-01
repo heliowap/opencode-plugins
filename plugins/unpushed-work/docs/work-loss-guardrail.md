@@ -38,7 +38,9 @@ sessions, and filters to the session's own location because each location's
 plugin instance receives the server-wide event stream. It runs after a
 **successful root-session turn**, not application shutdown. Failed or interrupted
 turns and machine crashes do not trigger it. Multiple successful turns in the same
-location are processed by the stream in order. Reports overwrite the previous snapshot.
+location are processed by the stream in order: one that arrives while a scan is
+still running waits for it, then runs a scan of its own — no turn is dropped.
+Reports overwrite the previous snapshot.
 
 Output: `${XDG_STATE_HOME:-$HOME/.local/state}/opencode-unpushed-work/last-report.txt`.
 Read this file at handoff, or run the CLI directly. **This is not a visible TUI
