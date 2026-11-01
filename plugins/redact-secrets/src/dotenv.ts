@@ -9,7 +9,7 @@ const QUOTED = /^(["'])(.*)\1\s*$/
 // Reads KEY=value lines: optional "export", optional single or double quotes,
 // and a trailing comment only when whitespace precedes the "#".
 export const parseDotenv = (text: string): [string, string][] =>
-  text.split("\n").flatMap((line) => {
+  text.split(/\r?\n/).flatMap((line) => {
     const match = ENTRY.exec(line)
     const name = match?.[1]
     if (!match || name === undefined) return []

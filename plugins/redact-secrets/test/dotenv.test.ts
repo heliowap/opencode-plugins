@@ -47,6 +47,13 @@ test("parseDotenv strips quotes, export and trailing comments", () => {
   ])
 })
 
+test("a CRLF dotenv contributes its secret values", () => {
+  expect(dotenvSecrets("SECRET_A=value-one-1111\r\nSECRET_B=value-two-2222\r\nPORT=3000\r\n")).toEqual([
+    "value-one-1111",
+    "value-two-2222",
+  ])
+})
+
 test("dotenvSecrets keeps only secret-named values of 12+ characters", () => {
   expect(dotenvSecrets(DOTENV)).toEqual([
     "dotenv-secret-abcdef99",
