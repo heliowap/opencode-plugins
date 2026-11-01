@@ -25,7 +25,7 @@ export const isLiteralValue = (value: string): boolean =>
 
 // A "key"[:=] "value" candidate. The key is a whole identifier (the left prefix is a
 // non-word character or the start), so a match never begins inside a longer name.
-const SECRET_FIELD = /(^|[^\w$])(["']?)([\w$]+)\2(\s*[:=]\s*)(["']?)((?:Bearer\s+)?[^\s"'`,;}]{8,})/gi
+const SECRET_FIELD = /(^|[^\w$])(["']?)([\w$]+)\2(\s*[:=]\s*)(["']?)((?:(?:Bearer|Basic)\s+)?[^\s"'`,;}]{8,})/gi
 
 // scheme://user:password@ — the password part of a URL's userinfo.
 const URL_CREDENTIAL = /([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)([^\s'"`/:?#@[\]]+):([^\s'"`@/?#[\]]+)@/g
@@ -58,10 +58,10 @@ export const createMasker = (options: { readonly secrets: readonly string[]; rea
         SECRET_FIELD,
         (match, lead: string, quote: string, key: string, separator: string, valueQuote: string, value: string) => {
           if (!isSecretFieldKey(key)) return match
-          const bearer = value.match(/^Bearer\s+/i)?.[0] ?? ""
-          const secret = value.slice(bearer.length)
+          const scheme = value.match(/^(?:Bearer|Basic)\s+/i)?.[0] ?? ""
+          const secret = value.slice(scheme.length)
           if (!isLiteralValue(secret)) return match
-          return `${lead}${quote}${key}${quote}${separator}${valueQuote}${bearer}${placeholder(secret)}`
+          return `${lead}${quote}${key}${quote}${separator}${valueQuote}${scheme}${placeholder(secret)}`
         },
       )
       .replace(URL_CREDENTIAL, (match, scheme: string, user: string, password: string) =>

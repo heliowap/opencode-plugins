@@ -23,6 +23,7 @@ test.each([
     "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c",
     "Authorization: Bearer [REDACTED:da469e5c]",
   ],
+  ["Authorization: Basic dXNlcjpwYXNzd29yZA==", "Authorization: Basic [REDACTED:1cd51d83]"],
 ])("masks the literal value in %j", (line, masked) => {
   expect(masker.redactText(line)).toBe(masked)
 })
@@ -63,6 +64,7 @@ test("a known secret value is masked under a field key", () => {
 test.each([
   "sk-live-abcdef123456",
   "hunter2hunter2",
+  "dXNlcjpwYXNzd29yZA==",
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c",
   "AKIAIOSFODNN7EXAMPLE",
 ])("treats %j as a literal value", (value) => {
