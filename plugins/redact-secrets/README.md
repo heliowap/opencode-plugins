@@ -9,7 +9,7 @@ them or the session stores them.
 
 The plugin registers tool `execute.after` and `execute.before` hooks. For a
 completed tool call it redacts the result; for a failed call it redacts the
-error (when the error is a plain object). Redaction walks strings, arrays and
+error. Redaction walks strings, arrays and
 plain objects recursively and replaces matches with a `[REDACTED:<id>]`
 placeholder:
 
@@ -50,6 +50,11 @@ placeholders from being written to disk:
   restart) or the bare `[REDACTED]` is rejected, unless the target file already
   contains that exact text. The error tells the agent to re-read the lines it
   wants to change.
+- A placeholder where the input names the target file — a `path` or
+  `filePath` field, or a file header inside a patch — is always rejected and
+  never substituted. The masked text there stands for a file location, and a
+  file's path can itself be a collected secret (the value of a credential
+  variable such as `GOOGLE_APPLICATION_CREDENTIALS`).
 - A `shell` input containing a `[REDACTED:<id>]` placeholder is rejected and
   never substituted, so placeholders cannot send secrets elsewhere. The bare
   `[REDACTED]` stays usable in commands such as `grep`.
