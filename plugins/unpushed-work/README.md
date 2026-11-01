@@ -48,6 +48,8 @@ checkout or repository write, and runs Git with `--no-optional-locks`.
 
 - **Trigger.** The plugin runs only after a successful root-session turn. Failed or
   interrupted turns, application shutdown and machine crashes do not trigger it.
+  Successful turns are handled in event order, one at a time: a turn that arrives
+  while a scan is still running waits for it, then runs a scan of its own.
 - **Delivery.** The report is a file. It is not a visible TUI warning or a backup.
   A notification or a handoff rule that reads the report is not implemented.
 - **Discovery.** It covers main checkouts, OpenCode worktrees, direct and
@@ -72,5 +74,7 @@ bun run test
 ```
 
 `test/script.test.ts` checks that the script path resolves inside the package and is
-executable. `test/test_unpushed_work.py` exercises the CLI against disposable
+executable. `test/report.test.ts` covers the report rules in `src/report.ts`; the
+coverage gate in `bunfig.toml` fails `bun test` below 95% of lines or functions.
+`test/test_unpushed_work.py` exercises the CLI against disposable
 repositories, bare local remotes and linked worktrees.
