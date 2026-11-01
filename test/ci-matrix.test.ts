@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { listPlugins } from "../install.ts"
@@ -87,11 +87,18 @@ describe("ci-matrix", () => {
   })
 
   test("a plugin without a test script gets an empty test", async () => {
-    const r = await run([], "plugins/redact-secrets/src/index.ts\nplugins/base-check/src/index.ts\n")
-    expect(r.rows.map((row) => [row.name, row.test])).toEqual([
-      ["base-check", "bun run test"],
-      ["redact-secrets", ""],
-    ])
+    const probe = join(root, "plugins", "notest-fixture")
+    mkdirSync(probe, { recursive: true })
+    await Bun.write(join(probe, "package.json"), JSON.stringify({ name: "notest-fixture", scripts: {} }))
+    try {
+      const r = await run([], "plugins/notest-fixture/src/index.ts\nplugins/base-check/src/index.ts\n")
+      expect(r.rows.map((row) => [row.name, row.test])).toEqual([
+        ["base-check", "bun run test"],
+        ["notest-fixture", ""],
+      ])
+    } finally {
+      rmSync(probe, { recursive: true, force: true })
+    }
   })
 
   test("overrides keep parity with the old per-repo CI", async () => {
