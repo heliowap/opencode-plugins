@@ -51,8 +51,9 @@ export default Plugin.define({
         return
       }
       if (!EDIT_TOOLS.has(event.tool)) return
-      const fileContains = (text: string) => targetPaths(event.tool, event.input).some((path) => fileText(path)?.includes(text) ?? false)
-      const restored = restoreInput(event.input, masker.lookup, fileContains)
+      const paths = targetPaths(event.tool, event.input)
+      const fileContains = (text: string) => paths.some((path) => fileText(path)?.includes(text) ?? false)
+      const restored = restoreInput(paths, event.input, masker.lookup, fileContains)
       if (!restored.ok) throw new ToolError({ message: restored.message })
       event.input = restored.input
     })

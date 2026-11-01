@@ -11,7 +11,7 @@ const KNOWN_ID = /\[REDACTED:([0-9a-f]{8})\]/g
 const ANY_ID = /\[REDACTED:[^\s\]]+\]/
 const MASK_TOKEN = /\[REDACTED(?::[^\s\]]+)?\]/g
 
-export const restoreRejection = (token: string): string =>
+const restoreRejection = (token: string): string =>
   `Edit input contains the placeholder "${token}", which cannot be resolved. Re-read the lines you want to change and write the edit again without the placeholder.`
 
 export const shellRejection = (token: string): string =>
@@ -34,7 +34,7 @@ export const findPlaceholder = (input: unknown): string | undefined => {
   return undefined
 }
 
-const PATH_FIELDS = ["path", "filePath"] as const
+const PATH_FIELDS: ReadonlySet<string> = new Set(["path", "filePath"])
 const PATCH_FILE = /^\*\*\*\s*(?:Add|Update|Delete)\s+File:\s*(.+?)\s*$|^\*\*\*\s*Move\s+to:\s*(.+?)\s*$/gm
 const DIFF_FILE = /^[-+]{3}\s+(?:[ab]\/)?(\S.*?)\s*$/gm
 
@@ -42,7 +42,7 @@ const DIFF_FILE = /^[-+]{3}\s+(?:[ab]\/)?(\S.*?)\s*$/gm
 // patch names in its "*** ... File:" and "---/+++" headers.
 export const targetPaths = (tool: string, input: unknown): string[] => {
   if (!isPlainObject(input)) return []
-  const paths = PATH_FIELDS.flatMap((field) => (typeof input[field] === "string" ? [input[field] as string] : []))
+  const paths = [...PATH_FIELDS].flatMap((field) => (typeof input[field] === "string" ? [input[field] as string] : []))
   if (tool !== "patch" && tool !== "apply_patch") return paths
   for (const text of strings(input)) {
     for (const match of text.matchAll(PATCH_FILE)) paths.push(match[1] ?? match[2] ?? "")
@@ -54,9 +54,13 @@ export const targetPaths = (tool: string, input: unknown): string[] => {
 export type Restored = { readonly ok: true; readonly input: unknown } | { readonly ok: false; readonly message: string }
 
 // Resolves every known [REDACTED:<id>] in the input back to its value. A mask
-// token that is left over (unknown id, or the bare [REDACTED]) is rejected with
-// a re-read message unless the target file already contains that exact text.
+// token in a file location — one of the target paths — is never resolved: it
+// stands for a masked path such as a credential file, and resolving it would
+// write to that path. It is rejected outright instead. Any mask token left
+// over elsewhere (unknown id, or the bare [REDACTED]) is rejected with a
+// re-read message unless the target file already contains that exact text.
 export const restoreInput = (
+  paths: readonly string[],
   input: unknown,
   lookup: (id: string) => string | undefined,
   fileContains: (text: string) => boolean,
@@ -64,8 +68,13 @@ export const restoreInput = (
   const restore = (value: unknown): unknown => {
     if (typeof value === "string") return value.replace(KNOWN_ID, (token, id: string) => lookup(id) ?? token)
     if (Array.isArray(value)) return value.map(restore)
-    if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, restore(item)]))
+    if (isPlainObject(value))
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, PATH_FIELDS.has(key) ? item : restore(item)]))
     return value
+  }
+  for (const path of paths) {
+    const token = path.match(MASK_TOKEN)?.[0]
+    if (token !== undefined) return { ok: false, message: restoreRejection(token) }
   }
   const next = restore(input)
   for (const text of strings(next)) {
