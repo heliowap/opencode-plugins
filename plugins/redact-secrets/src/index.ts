@@ -7,18 +7,19 @@ import { dotenvSecrets, isDotenvFile } from "./dotenv.ts"
 import { createMasker, isEnvSecretName, MIN_SECRET_LENGTH } from "./redact.ts"
 import { EDIT_TOOLS, findPlaceholder, restoreInput, SHELL_TOOLS, shellRejection, targetPaths } from "./restore.ts"
 
-// Values from .env and .env.* in the session directory are known secrets too.
+const safeRead = (path: string): string | undefined => {
+  try {
+    return readFileSync(path, "utf8")
+  } catch {
+    return undefined
+  }
+}
+
 const dotenvValues = (directory: string): string[] => {
   try {
     return readdirSync(directory)
       .filter(isDotenvFile)
-      .flatMap((name) => {
-        try {
-          return dotenvSecrets(readFileSync(join(directory, name), "utf8"))
-        } catch {
-          return []
-        }
-      })
+      .flatMap((name) => dotenvSecrets(safeRead(join(directory, name)) ?? ""))
   } catch {
     return []
   }
@@ -33,13 +34,7 @@ export default Plugin.define({
       .map(([, value]) => value as string)
       .concat(dotenvValues(ctx.location.directory))
     const masker = createMasker({ secrets, key: randomBytes(32) })
-    const fileText = (path: string) => {
-      try {
-        return readFileSync(resolve(ctx.location.directory, path), "utf8")
-      } catch {
-        return undefined
-      }
-    }
+    const fileText = (path: string) => safeRead(resolve(ctx.location.directory, path))
 
     // The model only ever sees masked text. Edit inputs get known placeholders
     // restored so files keep their real secrets; placeholders that cannot be
