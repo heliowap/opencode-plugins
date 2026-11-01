@@ -69,11 +69,22 @@ There is no automatic approval based on an agent's answer.
   that mention the name as data. Commands are tokenized, so a writer word or
   the name inside a quoted argument (a grep pattern, an echo string) does not
   count: only a writer's own arguments, a write API's path expression, or a
-  redirect target can name the file. The remote command of `ssh` is not
-  inspected, since it writes on another machine. If a command cannot be
-  parsed the match falls back to a textual scan, and a write whose target the
-  text does not show (a path computed at runtime, a script file) is not
-  caught either way; use the process guard for that.
+  redirect target can name the file. Wrappers that run another command are
+  unwrapped (`sudo`, `env`, `nice`, `timeout`, `chroot`, `flock`, `taskset`,
+  `busybox`, `setsid`, `unshare`, `nsenter`, `systemd-run`, `firejail`,
+  `time` and similar), and commands carried inside arguments are judged
+  again: an `eval` line, a shell's `-c` string, the command `xargs` runs,
+  `flock -c`, and `ssh -o` values that execute locally (`ProxyCommand`,
+  `LocalCommand`). The remote command of `ssh` is not inspected, since it
+  writes on another machine. A `VAR=value` word assigns only in command
+  position, and a write API's path expression counts an identifier the same
+  script assigns `AGENTS.md` to. A heredoc body counts only when the
+  receiving command executes stdin — a shell, `eval`, `ssh`, an interpreter
+  reading its program, or a later pipeline stage — not when a data sink such
+  as `cat` consumes it. If a command cannot be parsed the match falls back
+  to a textual scan, and a write whose target the text does not show (a
+  path computed at runtime, a script file) is not caught either way; use
+  the process guard for that.
   A recognized read does not override other OpenCode permission rules or
   approve later writes.
 
