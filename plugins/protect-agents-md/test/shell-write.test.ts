@@ -102,6 +102,25 @@ test("a command substitution inside arithmetic is still analyzed", () => {
   expect(flagsShellCommand("$(( $(cat AGENTS.md) + 1 ))")).toBe(false)
 })
 
+test("a command-executing wrapper resolves the command it runs", () => {
+  expect(flagsShellCommand("busybox rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("setsid rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("setsid -f rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("chroot /x rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("unshare rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("unshare -f rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("systemd-run rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("systemd-run --scope rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("nsenter -t 1 -m rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("flock /tmp/lock rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("flock /tmp/lock -c 'rm AGENTS.md'")).toBe(true)
+  expect(flagsShellCommand("taskset -c 0 rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("taskset 0x3 rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("firejail rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("busybox cat AGENTS.md")).toBe(false)
+  expect(flagsShellCommand("setsid cat AGENTS.md")).toBe(false)
+})
+
 test("a VAR=value word after the command is an argument, not an assignment", () => {
   expect(flagsShellCommand("echo F=AGENTS.md; rm $F")).toBe(false)
   expect(flagsShellCommand("F=AGENTS.md; rm $F")).toBe(true)
