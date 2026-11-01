@@ -27,8 +27,9 @@ Every claim here comes from a real `opencode serve` process with no mocked plugi
 | A10 | Tools refuse a second goal and impossible transitions | ✅ | exact tool results, stored `blocked` |
 | A11 | The objective reaches the model escaped | ✅ | captured request text |
 | A12a | A paused goal survives a server restart unchanged | ✅ | stored goal identical before and after |
-| A12b | An active goal cut off by a server death comes back paused | ✅ after #3 | stored `paused` with recovery note, then `complete` after resume |
+| A12b | An active goal cut off by a server death stays active and keeps going | ✅ after #9 | stored `complete` after the restart without a resume |
 | A12c | A location reload leaves a running goal active | ✅ | stored `complete` without user action |
+| A12e | `pauseOnRestart` brings a recovered goal back paused | ✅ after #9 | stored `paused` with the recovery note |
 | A12d | A location reload during a `plan` turn keeps that turn uncounted | ✅ after #10 | stored `tokensUsed: 0`, `emptyTurns: 0` |
 | A13 | Deleting a session removes its goal | ✅ | no stored goal, exactly one `goal.changed` with `goal: null` |
 | A16 | A goal follows its session to a new directory | ✅ after #11 | stored `directory` updated, then `complete` after resume there |
@@ -47,6 +48,10 @@ Every claim here comes from a real `opencode serve` process with no mocked plugi
 | A14 | The plugin installed from its package spec works | ✅ | stored `complete`. CI installs `github:<repo>#<commit under test>::path:plugins/goal` |
 | A15 | `goal.get` RPC returns the stored goal and `goal.changed` fires on each transition | ✅ | RPC output equals the `kv` row, events read from `/api/event` |
 | A17 | A bare `/goal edit` sends the full objective to the terminal through `goal.editRequested`, and `apply Edit` saves the new one | ✅ | event payload read from `/api/event`, stored new objective with status kept, refusal notice without a goal |
+| A18 | Two steps of one goal turn receive byte-identical `goal_context` | ✅ after #5 | identical system text while `tokensUsed` charged 120 then 240 |
+| A19 | Every refused `goal_update` names the next action | ✅ after #9 | exact `Tool.Error` messages for blocked, paused, and no-goal calls |
+| A20 | Turns without progress back off exponentially instead of polling | ✅ after #6 | request gaps ≥ base, 2×, 4×, 8×, 16× at `continuationDelayMs: 400`, stored `idleTurns: 6` |
+| A21 | A running child suppresses the parent's continuation, and the child's end emits exactly one | ✅ after #6 | exactly 1 parent request and 1 continuation while the child runs, then `complete` with 2 continuations |
 | R1 | `goal.apply` with `Pause` pauses an active goal | ✅ | real opencode serve, stored goal |
 | R2 | `goal.apply` with a raised `Budget` resumes a budget-limited goal, which then completes | ✅ | real opencode serve, stored goal |
 | R3 | `goal.apply` with `Verify` stores the verify command | ✅ | real opencode serve, stored goal |
@@ -96,5 +101,6 @@ The budget is checked when each model step ends, so the step that crosses it and
 | `/goal` typed in the terminal UI | ⚠️ Not established. Canaries call the same command through `POST /api/session/:id/command`. The status line in the terminal is verified (T1, T2). |
 | Status line in the desktop and web apps | ⚠️ Not established. They do not load terminal plugins. |
 | Esc in the terminal UI during a running tool | ⚠️ Not established. The API interrupt is verified (A7a). |
-| OpenCode versions other than 2.0.24 | ⚠️ Not established. |
+| OpenCode 2.2.5's built-in `goal` plugin | ⚠️ Partially established. Its `goal` command shadows this plugin's in `/api/command` listings (A1 now asserts presence plus the `goal_*` tools), while `/goal` execution, storage, and continuations still reach this plugin — the deterministic suite passes on 2.2.5. |
+| OpenCode versions other than 2.0.24 | ⚠️ Not established beyond the 2.2.5 note above. |
 | Windows | ⚠️ Not established. |
