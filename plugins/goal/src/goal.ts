@@ -15,6 +15,7 @@ export const Goal = Schema.Struct({
   verifyFailures: Schema.optional(Schema.Int),
   lastExitCode: Schema.optional(Schema.Int),
   failedTurns: Schema.optional(Schema.Int),
+  idleTurns: Schema.optional(Schema.Int),
   continueAt: Schema.optional(Schema.Finite),
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
@@ -38,6 +39,13 @@ export const continuationDelay = (option: unknown): number =>
   typeof option === "number" && option >= 0 && option < Infinity ? option : 120_000
 
 export const pauseOnRestart = (option: unknown): boolean => option === true
+
+const IDLE_DELAY_CAP_MS = 1_800_000
+
+// The wait after a no-progress turn doubles each time, capped at thirty minutes — never below the
+// configured base delay. `idleTurns` is the count before the turn that just ended.
+export const idleDelay = (base: number, idleTurns: number) =>
+  Math.min(base * 2 ** idleTurns, Math.max(base, IDLE_DELAY_CAP_MS))
 
 // OpenCode reports HTTP statuses up to 599.
 const serverError = (status: number | undefined) => (status ?? 0) >= 500
@@ -70,8 +78,16 @@ export type GoalEvent =
   | { readonly _tag: "PauseRequested"; readonly note: string | undefined }
   | { readonly _tag: "Usage"; readonly tokens: number; readonly closing: boolean }
   | { readonly _tag: "TurnStarted" }
-  | { readonly _tag: "TurnEnded"; readonly activity: boolean; readonly planning: boolean; readonly delayMs?: number }
+  | {
+      readonly _tag: "TurnEnded"
+      readonly activity: boolean
+      readonly progress: boolean
+      readonly waiting: boolean
+      readonly planning: boolean
+      readonly delayMs?: number
+    }
   | { readonly _tag: "ContinueDue"; readonly at: number }
+  | { readonly _tag: "ChildEnded"; readonly running: number; readonly delayMs?: number }
   | { readonly _tag: "Interrupted"; readonly reason: "user" | "shutdown" | "superseded" | "inactivity" }
   | { readonly _tag: "Failed"; readonly message: string; readonly status?: number }
   | { readonly _tag: "RetryDue"; readonly attempt: number }
@@ -102,7 +118,7 @@ const none: GoalEffect = { _tag: "None" }
 const notify = (text: string): GoalEffect => ({ _tag: "Notify", text })
 const refuse = (text: string): GoalEffect => ({ _tag: "Refuse", text })
 const RESET_STREAK = { failedTurns: undefined, continueAt: undefined }
-const REACTIVATED = { status: "active", note: undefined, emptyTurns: 0, ...RESET_STREAK } as const
+const REACTIVATED = { status: "active", note: undefined, emptyTurns: 0, idleTurns: 0, ...RESET_STREAK } as const
 const BUDGET_REACHED = { status: "budget_limited", note: "Token budget reached." } as const
 
 export const isUnfinished = (goal: Goal | undefined): goal is Goal => goal !== undefined && goal.status !== "complete"
@@ -155,6 +171,7 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
         tokenBudget: event.tokenBudget,
         tokensUsed: 0,
         emptyTurns: 0,
+        idleTurns: 0,
         directory: event.directory,
         ...(event.verify !== null && { verify: event.verify }),
         createdAt: now,
@@ -207,7 +224,7 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
       const refusal = continueRefusal(goal)
       if (refusal) return { goal, effect: refuse(refusal) }
       if (goal.status === "active") {
-        return update({ objective: event.objective, emptyTurns: 0, ...RESET_STREAK }, { _tag: "ObjectiveUpdated" })
+        return update({ objective: event.objective, emptyTurns: 0, idleTurns: 0, ...RESET_STREAK }, { _tag: "ObjectiveUpdated" })
       }
       return update(
         { objective: event.objective },
@@ -286,18 +303,25 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
     case "TurnEnded": {
       if (goal.status !== "active" || event.planning) return unchanged
       const emptyTurns = event.activity ? 0 : goal.emptyTurns + 1
-      const at = now + continuationDelay(event.delayMs)
-      return emptyTurns >= EMPTY_TURN_LIMIT
-        ? update({
-            emptyTurns,
-            ...RESET_STREAK,
-            status: "blocked",
-            note: `${EMPTY_TURN_LIMIT} consecutive turns produced no visible text or file edits. Run /goal resume to continue.`,
-          })
-        : update(
-            { emptyTurns, ...RESET_STREAK, continueAt: at },
-            { _tag: "Cooldown", at },
-          )
+      const idleTurns = event.progress ? 0 : (goal.idleTurns ?? 0) + 1
+      if (emptyTurns >= EMPTY_TURN_LIMIT) {
+        return update({
+          emptyTurns,
+          idleTurns,
+          ...RESET_STREAK,
+          status: "blocked",
+          note: `${EMPTY_TURN_LIMIT} consecutive turns produced no visible text or progress. Run /goal resume to continue.`,
+        })
+      }
+      // A running child session keeps the parent quiet until its ChildEnded arrives.
+      if (event.waiting) return update({ emptyTurns, idleTurns, ...RESET_STREAK })
+      const at = now + idleDelay(continuationDelay(event.delayMs), event.progress ? 0 : (goal.idleTurns ?? 0))
+      return update({ emptyTurns, idleTurns, ...RESET_STREAK, continueAt: at }, { _tag: "Cooldown", at })
+    }
+    case "ChildEnded": {
+      if (goal.status !== "active" || event.running > 0) return unchanged
+      const at = now + idleDelay(continuationDelay(event.delayMs), goal.idleTurns ?? 0)
+      return update({ continueAt: at }, { _tag: "Cooldown", at })
     }
   }
 }

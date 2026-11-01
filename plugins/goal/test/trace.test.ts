@@ -88,7 +88,7 @@ describe("transitionRecord", () => {
   })
 
   test("a turn that only continues is recorded, so the log shows every turn", () => {
-    expect(transitionRecord("ses_1", { _tag: "TurnEnded", activity: true, planning: false }, goal(), goal(), { _tag: "Continue" }, AT)).toStrictEqual({
+    expect(transitionRecord("ses_1", { _tag: "TurnEnded", activity: true, progress: true, waiting: false, planning: false }, goal(), goal(), { _tag: "Continue" }, AT)).toStrictEqual({
       at: AT, _tag: "Transition", sessionID: "ses_1",
       event: "TurnEnded",
       from: "active",
@@ -136,7 +136,7 @@ describe("transitionRecord", () => {
 
   test("an event that changes nothing and does nothing is not recorded", () => {
     const same = goal({ status: "paused" })
-    expect(transitionRecord("ses_1", { _tag: "TurnEnded", activity: true, planning: false }, same, same, { _tag: "None" }, AT)).toBeUndefined()
+    expect(transitionRecord("ses_1", { _tag: "TurnEnded", activity: true, progress: true, waiting: false, planning: false }, same, same, { _tag: "None" }, AT)).toBeUndefined()
   })
 })
 
