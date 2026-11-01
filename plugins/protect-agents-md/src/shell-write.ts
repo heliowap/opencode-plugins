@@ -79,13 +79,25 @@ const TIME_VALUE_OPTS = new Set(["-f", "--format", "-o", "--output"])
 
 // Commands whose argv[0] wraps another command; option-with-value arguments are skipped so the
 // wrapped command becomes argv[0]. env and sudo also take VAR=value words, timeout takes a
-// duration.
-const WRAPPERS: Record<string, { opts: ReadonlySet<string>; assigns?: boolean; positional?: number }> = {
+// duration. "cmdOpts" are options whose value is itself a command string (flock -c),
+// "positional" counts leading operands that are not the command (chroot's directory, flock's
+// lock file, taskset's mask), and "positionalOpts" are value options that satisfy that
+// operand themselves (taskset -c gives the mask inline).
+const WRAPPERS: Record<
+  string,
+  {
+    opts: ReadonlySet<string>
+    assigns?: boolean
+    positional?: number
+    cmdOpts?: ReadonlySet<string>
+    positionalOpts?: ReadonlySet<string>
+  }
+> = {
   sudo: {
     opts: new Set(["-u", "-g", "-h", "-p", "-C", "-T", "-D", "-R", "--user", "--group", "--host", "--prompt", "--chdir", "--role", "--type"]),
     assigns: true,
   },
-  doas: { opts: new Set(["-u"]) },
+  doas: { opts: new Set(["-u", "-C"]) },
   pkexec: { opts: new Set(["--user"]) },
   env: { opts: new Set(["-u", "--unset", "-C", "--chdir", "-S", "--split-string"]), assigns: true },
   exec: { opts: new Set(["-a", "--argv0"]) },
@@ -99,6 +111,44 @@ const WRAPPERS: Record<string, { opts: ReadonlySet<string>; assigns?: boolean; p
   stdbuf: { opts: new Set(["-i", "-o", "-e", "--input", "--output", "--error"]) },
   sshpass: { opts: new Set(["-p", "-f", "-d", "-o", "--option"]) },
   time: { opts: TIME_VALUE_OPTS },
+  busybox: { opts: new Set() },
+  setsid: { opts: new Set() },
+  chroot: { opts: new Set(["--userspec", "--groups"]), positional: 1 },
+  unshare: {
+    opts: new Set([
+      "-S", "--setuid", "-G", "--setgid", "--setgroups", "-R", "--root", "-w", "--wd",
+      "--propagation", "--monotonic", "--boottime", "--map-user", "--map-group", "--map-users", "--map-groups",
+    ]),
+  },
+  "systemd-run": {
+    opts: new Set([
+      "-p", "--property", "--unit", "-d", "--description", "--slice", "--uid", "--gid",
+      "-E", "--setenv", "--working-directory", "--service-type", "--nice", "--machine", "-M",
+      "-H", "--host", "--job-mode", "--on-active", "--on-boot", "--on-startup", "--on-unit-active",
+      "--on-unit-inactive", "--on-calendar", "--timer-property", "--path-property", "--timezone",
+    ]),
+  },
+  // nsenter's namespace options take an optional file and are usually valueless when -t gives
+  // the pid, so they are treated as flags; the pid and ids take required values.
+  nsenter: { opts: new Set(["-t", "--target", "-S", "--setuid", "-G", "--setgid"]) },
+  flock: {
+    opts: new Set(["-w", "--timeout", "-E", "--conflict-exit-code"]),
+    cmdOpts: new Set(["-c", "--command"]),
+    positional: 1,
+  },
+  // "-c" gives the cpu list itself, so it replaces the mask operand; without it the first
+  // positional is the mask.
+  taskset: { opts: new Set(), positionalOpts: new Set(["-c", "--cpu-list"]), positional: 1 },
+  firejail: {
+    opts: new Set([
+      "--profile", "--profile-path", "--include", "--net", "--netns", "--ip", "--ip6", "--mac",
+      "--name", "--hostname", "--dns", "--hosts-file", "--chroot", "--private", "--private-bin",
+      "--private-etc", "--private-home", "--private-lib", "--private-opt", "--private-tmp",
+      "--seccomp", "--protocol", "--cpu", "--nice", "--user", "--env", "--output", "--join",
+      "--join-filesystem", "--join-network", "--bandwidth", "--timeout", "--whitelist",
+      "--blacklist", "--read-only", "--read-write", "--bind", "--tmpfs",
+    ]),
+  },
 }
 const WRITER_NAMES = new Set(WRITER.slice("(?:".length, -1).split("|"))
 const IN_PLACE_CMDS = new Set(["sed", "perl", "ruby", "gsed"])
@@ -502,26 +552,51 @@ const scriptFlags = (text: string, run: (inner: string) => boolean): boolean => 
 }
 
 // Drops leading VAR=value words and command wrappers (sudo, env, nice, …) so argv[0] is the
-// command that actually runs.
-const unwrap = (argv: readonly string[]): { cmd: string; args: readonly string[] } => {
+// command that actually runs. An option that carries a command string (flock -c) is reported
+// as "cmdString"; options may sit on either side of a wrapper's positional operands.
+const unwrap = (argv: readonly string[]): { cmd: string; args: readonly string[]; cmdString?: string } => {
   let i = 0
+  let cmdString: string | undefined
   for (;;) {
     if (/^[A-Za-z_]\w*=/.test(argv[i] ?? "")) {
       i++
       continue
     }
     const wrapper = WRAPPERS[basenameOf(argv[i] ?? "")]
-    if (wrapper === undefined) return { cmd: basenameOf(argv[i] ?? ""), args: argv.slice(i + 1) }
+    if (wrapper === undefined) return { cmd: basenameOf(argv[i] ?? ""), args: argv.slice(i + 1), cmdString }
     i++
-    while (i < argv.length && argv[i]!.startsWith("-")) i += wrapper.opts.has(argv[i]!) ? 2 : 1
-    while (wrapper.assigns === true && i < argv.length && /^[A-Za-z_]\w*=/.test(argv[i]!)) i++
-    i += wrapper.positional ?? 0
+    let positional = wrapper.positional ?? 0
+    for (;;) {
+      while (i < argv.length && argv[i]!.startsWith("-")) {
+        const opt = argv[i]!
+        if (wrapper.cmdOpts?.has(opt)) {
+          if (argv[i + 1] !== undefined) cmdString = argv[i + 1]
+          i += 2
+          continue
+        }
+        if (wrapper.positionalOpts?.has(opt)) {
+          positional = 0
+          i += 2
+          continue
+        }
+        i += wrapper.opts.has(opt) ? 2 : 1
+      }
+      while (wrapper.assigns === true && i < argv.length && /^[A-Za-z_]\w*=/.test(argv[i]!)) i++
+      if (positional > 0 && i < argv.length && !argv[i]!.startsWith("-")) {
+        positional--
+        i++
+        continue
+      }
+      break
+    }
   }
 }
 
 const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: string) => boolean): boolean => {
   if (simple.redirects.some((redirect) => redirect.write && NAMES.test(redirect.target))) return true
-  const { cmd, args } = unwrap(simple.argv)
+  const { cmd, args, cmdString } = unwrap(simple.argv)
+  // An option like flock's "-c" carries a command string: it is analyzed as a command.
+  if (cmdString !== undefined && run(cmdString)) return true
   // The remote command of ssh runs on another machine; only its local redirects count.
   if (cmd === "ssh") return false
   const names = (word: string) => NAMES.test(word)
