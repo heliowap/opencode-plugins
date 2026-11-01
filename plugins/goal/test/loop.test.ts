@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { forget, LOOP_LIMIT, MUTATING_TOOLS, RESETTING_TOOLS, loopStep, shellCommand, withWarning, type Streaks } from "../src/loop.ts"
+import { forget, LOOP_LIMIT, MUTATING_TOOLS, PROGRESS_TOOLS, RESETTING_TOOLS, loopStep, shellCommand, withWarning, type Streaks } from "../src/loop.ts"
 
 const shell = (command: string) => ({ command })
 
@@ -57,6 +57,10 @@ test("sessions have separate streaks, and a reset clears only the chosen session
 test("the single source of truth lists file changes, and subagent dispatches also reset", () => {
   expect(MUTATING_TOOLS).toEqual(new Set(["write", "edit", "patch", "apply_patch"]))
   expect(RESETTING_TOOLS).toEqual(new Set(["write", "edit", "patch", "apply_patch", "subagent"]))
+})
+
+test("a goal turn makes progress through a file change, a subagent, or the goal status tool (#6)", () => {
+  expect(PROGRESS_TOOLS).toEqual(new Set(["write", "edit", "patch", "apply_patch", "subagent", "goal_update"]))
 })
 
 test("file changes and subagent dispatches reset a streak, reads and searches do not", () => {
