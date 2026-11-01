@@ -30,6 +30,8 @@ export const formatElapsed = (ms: number) => {
 const verifyRule = (command: string) =>
   `The user set a verify command: \`${escapeXml(command)}\`. goal_update with status "complete" runs it in the goal's directory and keeps the goal open unless it exits 0.`
 
+const VERIFY_COMMAND_LIMIT = 300
+
 const values = (goal: Goal, now: number) => ({
   objective: escapeXml(goal.objective),
   tokensUsed: String(goal.tokensUsed),
@@ -38,7 +40,8 @@ const values = (goal: Goal, now: number) => ({
   elapsed: formatElapsed(now - goal.createdAt),
   verification: goal.verify === undefined ? "" : `\n\nVerification:\n${verifyRule(goal.verify)}`,
   // The continuation names the command only; the rule it refers to lives once in session_context.md.
-  verifyCommand: goal.verify === undefined ? "" : `\n- Verify command: \`${escapeXml(goal.verify)}\``,
+  // The name is capped so the continuation keeps its 600-char budget; goal_context carries the full command.
+  verifyCommand: goal.verify === undefined ? "" : `\n- Verify command: \`${escapeXml(goal.verify).slice(0, VERIFY_COMMAND_LIMIT)}\``,
 })
 
 export const continuationPrompt = (goal: Goal, now: number) => render(templates.continuation, values(goal, now))
