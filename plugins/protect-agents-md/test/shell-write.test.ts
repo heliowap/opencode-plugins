@@ -158,6 +158,8 @@ test("pipeline output feeding a stdin-executing command is judged", () => {
   expect(flagsShellCommand("printf 'rm AGENTS.md' | cat | sh")).toBe(true)
   expect(flagsShellCommand("echo AGENTS.md | sh")).toBe(false)
   expect(flagsShellCommand("echo 'rm AGENTS.md' | cat")).toBe(false)
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | at now")).toBe(true)
+  expect(flagsShellCommand("at now <<EOF\nrm AGENTS.md\nEOF")).toBe(true)
 })
 
 test("a VAR=value word after the command is an argument, not an assignment", () => {
