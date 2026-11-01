@@ -152,6 +152,14 @@ test("a heredoc body is judged only when its receiver executes it", () => {
   expect(flagsShellCommand("cat <<EOF | sh\nrm AGENTS.md\nEOF")).toBe(true)
 })
 
+test("pipeline output feeding a stdin-executing command is judged", () => {
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | sh")).toBe(true)
+  expect(flagsShellCommand("printf 'rm' ' AGENTS.md' | bash")).toBe(true)
+  expect(flagsShellCommand("printf 'rm AGENTS.md' | cat | sh")).toBe(true)
+  expect(flagsShellCommand("echo AGENTS.md | sh")).toBe(false)
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | cat")).toBe(false)
+})
+
 test("a VAR=value word after the command is an argument, not an assignment", () => {
   expect(flagsShellCommand("echo F=AGENTS.md; rm $F")).toBe(false)
   expect(flagsShellCommand("F=AGENTS.md; rm $F")).toBe(true)
