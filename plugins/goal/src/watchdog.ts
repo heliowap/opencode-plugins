@@ -12,6 +12,9 @@ export const tickInterval = (stallMs: number) =>
 export interface Child {
   readonly parentID: string
   readonly running: boolean
+  // A created-but-never-ended child is live even before it starts and after a stall, so the parent
+  // stays quiet until an end or delete event. `ended` clears only when the child starts again.
+  readonly ended: boolean
   readonly lastActivity: number
   readonly openCalls: ReadonlySet<string>
 }
@@ -63,11 +66,11 @@ export const watch = (children: Children, event: WatchEvent, now: number, stallM
     }
     case "Created": {
       const next = new Map(children)
-      next.set(event.sessionID, { parentID: event.parentID, running: false, lastActivity: now, openCalls: new Set() })
+      next.set(event.sessionID, { parentID: event.parentID, running: false, ended: false, lastActivity: now, openCalls: new Set() })
       return { children: next, stalls: [] }
     }
     case "Started":
-      return update(event.sessionID, (child) => ({ ...child, running: true, lastActivity: now, openCalls: new Set() }))
+      return update(event.sessionID, (child) => ({ ...child, running: true, ended: false, lastActivity: now, openCalls: new Set() }))
     case "Activity":
       return update(event.sessionID, (child) => ({ ...child, lastActivity: now }))
     case "ToolCalled":
@@ -79,7 +82,7 @@ export const watch = (children: Children, event: WatchEvent, now: number, stallM
         return { ...child, lastActivity: now, openCalls }
       })
     case "Ended":
-      return update(event.sessionID, (child) => ({ ...child, running: false, openCalls: new Set() }))
+      return update(event.sessionID, (child) => ({ ...child, running: false, ended: true, openCalls: new Set() }))
     case "Deleted":
       return update(event.sessionID, () => undefined)
     default: {

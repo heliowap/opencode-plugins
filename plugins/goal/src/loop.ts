@@ -8,6 +8,10 @@ export const MUTATING_TOOLS: ReadonlySet<string> = new Set(["write", "edit", "pa
 // A subagent dispatch also ends a streak: the work it hands off is no longer a repeated poll.
 export const RESETTING_TOOLS: ReadonlySet<string> = new Set([...MUTATING_TOOLS, "subagent"])
 
+// A goal turn makes progress when a completed call changes a file, dispatches a subagent, or
+// settles the goal status. Observation-only calls like goal_get do not count.
+export const PROGRESS_TOOLS: ReadonlySet<string> = new Set([...MUTATING_TOOLS, "subagent", "goal_update"])
+
 export const shellCommand = (tool: string, input: unknown): string | undefined => {
   const command = (input as { command?: unknown } | null | undefined)?.command
   return tool === "shell" && typeof command === "string" ? command.trim() : undefined
