@@ -14,12 +14,17 @@ export default Plugin.define({
   id: "local.unpushed-work",
   setup(ctx) {
     const controller = new AbortController()
+    // The whole turn is one promise so a synchronous throw inside it rejects per event and is
+    // noted, instead of escaping the loop and ending the stream.
+    const turn = async (sessionID: string) => {
+      const session = await ctx.session.get({ sessionID })
+      if (!shouldReport(session, ctx.location)) return
+      await report(session.id, new Date(session.time.created).toISOString())
+    }
     void (async () => {
       for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
         if (event.type !== "session.execution.succeeded") continue
-        const session = await ctx.session.get({ sessionID: event.data.sessionID }).catch(failed)
-        if (session === undefined || !shouldReport(session, ctx.location)) continue
-        await report(session.id, new Date(session.time.created).toISOString()).catch(failed)
+        await turn(event.data.sessionID).catch(failed)
       }
     })().catch((error: unknown) => {
       if (!controller.signal.aborted) return write(`# event stream failed: ${error}\n`).catch(() => {})
