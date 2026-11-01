@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { continuationDelay, decodeGoal, isUnfinished, retryDelays, step, type Goal } from "../src/goal.ts"
+import { continuationDelay, decodeGoal, isUnfinished, retryDelays, step, updateRefusal, type Goal } from "../src/goal.ts"
 
 const T0 = 1_000
 const T1 = 2_000
@@ -430,6 +430,58 @@ describe("recovery after a restart (#3, #9)", () => {
     for (const pauseOnRestart of [true, false]) {
       expect(step(goal, { _tag: "Recovered", pauseOnRestart }, T1)).toEqual({ goal, effect: { _tag: "None" } })
     }
+  })
+})
+
+describe("refused goal_update transitions name the next action (#9)", () => {
+  test.each([
+    [
+      "blocked",
+      "complete",
+      "The goal is blocked and cannot move to complete. Only the user can resume it with /goal resume; report the evidence to the user instead of calling goal_update again.",
+    ],
+    [
+      "blocked",
+      "paused",
+      "The goal is blocked and cannot move to paused. Only the user can resume it with /goal resume; report the evidence to the user instead of calling goal_update again.",
+    ],
+    [
+      "paused",
+      "complete",
+      "The goal is paused and cannot move to complete. Only the user can resume it with /goal resume; report the evidence to the user instead of calling goal_update again.",
+    ],
+    [
+      "paused",
+      "blocked",
+      "The goal is paused and cannot move to blocked. Only the user can resume it with /goal resume; report the evidence to the user instead of calling goal_update again.",
+    ],
+    [
+      "budget_limited",
+      "paused",
+      "The goal is budget_limited and cannot move to paused. Only the user can raise the token budget; report the budget state to the user instead of calling goal_update again.",
+    ],
+    [
+      "budget_limited",
+      "blocked",
+      "The goal is budget_limited and cannot move to blocked. Only the user can raise the token budget; report the budget state to the user instead of calling goal_update again.",
+    ],
+    [
+      "complete",
+      "paused",
+      "The goal is complete and cannot move to paused. Create a new goal with goal_create or ask the user for one instead of calling goal_update again.",
+    ],
+    [
+      "active",
+      "complete",
+      "The goal is active and cannot move to complete. Keep working toward the objective and call goal_update again once the completion or blocked audit passes.",
+    ],
+    [
+      "cleared",
+      "complete",
+      "The goal is cleared and cannot move to complete. Create a new goal with goal_create or ask the user to set one with /goal <objective>.",
+    ],
+  ] as const)("%s -> %s", (status, target, expected) => {
+    expect(updateRefusal(status, target)).toBe(expected)
   })
 })
 

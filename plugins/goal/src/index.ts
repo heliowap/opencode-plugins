@@ -6,7 +6,7 @@ import { homedir } from "node:os"
 import { parseCommand, type GoalCommand } from "./command.ts"
 import { formatTokens } from "./format.ts"
 import {
-  continuationDelay, decodeGoal, isUnfinished, pauseOnRestart, retryDelays, step,
+  continuationDelay, decodeGoal, isUnfinished, pauseOnRestart, retryDelays, step, updateRefusal,
   type Check, type Goal, type GoalEffect, type GoalEvent,
 } from "./goal.ts"
 import {
@@ -434,12 +434,13 @@ export default Plugin.define({
                   : undefined
               const event: GoalEvent = check ? { _tag: "Complete", note: input.note, check } : updateEvents[input.status](input.note)
               const { before, goal } = yield* transition(context.sessionID, event)
-              if (!before) return yield* new Tool.Error({ message: "No goal is set for this session." })
+              if (!before)
+                return yield* new Tool.Error({
+                  message: "No goal is set for this session. Create one with goal_create, or ask the user to set it with /goal <objective>.",
+                })
               if (check && check.exitCode !== 0 && goal) return yield* new Tool.Error({ message: verifyFailedText(goal, check) })
               if (goal?.status !== input.status) {
-                return yield* new Tool.Error({
-                  message: `The goal is ${goal?.status ?? "cleared"} and cannot move to ${input.status}.`,
-                })
+                return yield* new Tool.Error({ message: updateRefusal(goal?.status ?? "cleared", input.status) })
               }
               closingSteps.set(context.sessionID, context.messageID)
               const budget =
