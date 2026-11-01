@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Usage: scripts/trial-install.sh <ref> <name>...
 # Installs plugins/<name> from github:heliowap/opencode-plugins#<ref> into an
-# isolated OpenCode environment and proves they load, without touching the
-# live ~/.config/opencode.
+# isolated OpenCode environment and proves they load, then proves `plugin
+# update` and `plugin remove` accept the spec of the first <name>, all
+# without touching the live ~/.config/opencode.
 set -euo pipefail
 
 if [ "$#" -lt 2 ]; then
@@ -119,8 +120,35 @@ print(json.dumps(next(p for p in json.load(sys.stdin)["data"] if p.get("source",
 ' "$name")"
 done
 
+# (e2) update proof. `plugin update` resolves its target through a server; the
+# managed service is unreachable here (the live one holds its port), so use
+# the proof server. A target absent from the config must be refused, or the
+# exit-0 check above proves nothing.
+url="http://127.0.0.1:$port"
+probe_spec="github:heliowap/opencode-plugins#${ref}::path:plugins/${names[0]}"
+echo "+ opencode plugin update --server $url '$probe_spec'"
+opencode plugin update --server "$url" "$probe_spec"
+echo "+ opencode plugin update --server $url"
+opencode plugin update --server "$url"
+bogus="github:heliowap/opencode-plugins#${ref}::path:plugins/__none__"
+if out=$(opencode plugin update --server "$url" "$bogus" 2>&1); then
+  echo "update accepted an unconfigured target: $bogus" >&2
+  exit 1
+fi
+echo "unconfigured target refused: $(printf '%s\n' "$out" | head -1)"
+
 # (f) teardown
 cleanup
+
+# (f2) remove proof. `plugin remove` edits the config directly; the entry must
+# be gone afterwards.
+echo "+ opencode plugin remove '$probe_spec'"
+opencode plugin remove "$probe_spec"
+if grep -rqF -- "$probe_spec" "$XDG_CONFIG_HOME/opencode"; then
+  echo "spec still present in isolated config after remove: $probe_spec" >&2
+  exit 1
+fi
+echo "config entry removed: $probe_spec"
 
 # (g) live files untouched
 after_hashes=$(hash_live)
