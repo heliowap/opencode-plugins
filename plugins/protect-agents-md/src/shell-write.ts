@@ -73,6 +73,10 @@ const COPY_WRITE = new RegExp(String.raw`\b(?:renameSync|copyFileSync|os\.(?:ren
 // Shell-out APIs carry a nested shell command; the call's quoted strings become its argv.
 const SHELL_OUT = /\b(?:os\.system|subprocess\.\w+|system|exec|spawn|popen)\s*\(([^)]*)\)/g
 
+// The `time` keyword (and GNU time) takes options before the timed command; only these
+// consume a separate value.
+const TIME_VALUE_OPTS = new Set(["-f", "--format", "-o", "--output"])
+
 // Commands whose argv[0] wraps another command; option-with-value arguments are skipped so the
 // wrapped command becomes argv[0]. env and sudo also take VAR=value words, timeout takes a
 // duration.
@@ -94,6 +98,7 @@ const WRAPPERS: Record<string, { opts: ReadonlySet<string>; assigns?: boolean; p
   watch: { opts: new Set(["-n", "--interval"]) },
   stdbuf: { opts: new Set(["-i", "-o", "-e", "--input", "--output", "--error"]) },
   sshpass: { opts: new Set(["-p", "-f", "-d", "-o", "--option"]) },
+  time: { opts: TIME_VALUE_OPTS },
 }
 const WRITER_NAMES = new Set(WRITER.slice("(?:".length, -1).split("|"))
 const IN_PLACE_CMDS = new Set(["sed", "perl", "ruby", "gsed"])
@@ -299,10 +304,25 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
   let bodies: string[] = []
   let pending: { delim: string; stripTabs: boolean; sink: string[] }[] = []
   let pipeline = 0
+  // "opts" while the words of a `time` keyword's option list are being skipped;
+  // "value" when the next word is the value of a time option.
+  let timeState: "off" | "opts" | "value" = "off"
   let i = 0
 
   const pushWord = (word: string) => {
-    if (argv.length === 0 && KEYWORDS.has(word)) return
+    if (timeState === "value") {
+      timeState = "opts"
+      return
+    }
+    if (timeState === "opts" && word.startsWith("-")) {
+      if (TIME_VALUE_OPTS.has(word)) timeState = "value"
+      return
+    }
+    timeState = "off"
+    if (argv.length === 0 && KEYWORDS.has(word)) {
+      if (word === "time") timeState = "opts"
+      return
+    }
     // Shells only take VAR=value words in command position; a "name=value" argument
     // elsewhere (echo F=x) is data and must not feed variable expansion.
     const assign = /^([A-Za-z_]\w*)=(.*)$/s.exec(word)
@@ -317,6 +337,7 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
     argv = []
     redirects = []
     bodies = []
+    timeState = "off"
   }
   const consumeHeredocs = () => {
     for (const h of pending) {
