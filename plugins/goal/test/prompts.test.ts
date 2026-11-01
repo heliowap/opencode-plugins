@@ -193,6 +193,15 @@ test("continuation names the verify command; session context states its rule onc
   expect(sessionContext(verified, 0)).toContain(`</objective>\n\nVerification:\n${rule}\n\nKeep working`)
 })
 
+test("a long verify command is capped so the continuation stays under 600 chars (#7)", () => {
+  const long = { ...verified, verify: `make check ${"x".repeat(400)}` }
+  const prompt = continuationPrompt(long, 0)
+  expect(prompt.length).toBeLessThanOrEqual(600)
+  expect(prompt).toContain("- Verify command: `make check x")
+  expect(prompt).not.toContain(long.verify)
+  expect(sessionContext(long, 0)).toContain(long.verify)
+})
+
 test("without a verify command the prompts say nothing about verification", () => {
   const continuation = continuationPrompt(goal, 0)
   expect(continuation).toContain("- Tokens remaining: 7500\n\n")
