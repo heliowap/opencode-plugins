@@ -545,9 +545,9 @@ describe("idle turns back off and wait for child sessions (#6)", () => {
     })
   })
 
-  test("no continuation runs while a child session is running, and exactly one follows its end", () => {
+  test("a live child pushes the continuation out to a bound, and its end pulls it back (#6)", () => {
     const waiting = step(active({ emptyTurns: 2, continueAt: 130_000 }), { ...turn(true), waiting: true }, T1)
-    expect(waiting).toEqual({ goal: active({ updatedAt: T1 }), effect: { _tag: "None" } })
+    expect(waiting).toEqual({ goal: active({ continueAt: 1_802_000, updatedAt: T1 }), effect: { _tag: "Cooldown", at: 1_802_000 } })
     const ended = step(waiting.goal, { _tag: "ChildEnded", running: 0, delayMs: 120_000 }, 3_000)
     expect(ended).toEqual({
       goal: active({ continueAt: 123_000, updatedAt: 3_000 }),
@@ -559,14 +559,25 @@ describe("idle turns back off and wait for child sessions (#6)", () => {
     })
   })
 
+  test("the wait bound still fires when no child event ever arrives (#6)", () => {
+    const waiting = step(active(), { ...turn(true), waiting: true }, T1)
+    expect(step(waiting.goal, { _tag: "ContinueDue", at: 1_802_000 }, 1_802_000)).toEqual({
+      goal: active({ updatedAt: 1_802_000 }),
+      effect: { _tag: "Continue" },
+    })
+    expect(step(active(), { ...turn(true), waiting: true, delayMs: 3_600_000 }, T1).goal).toEqual(
+      active({ continueAt: 3_602_000, updatedAt: T1 }),
+    )
+  })
+
   test("a waiting turn leaves the idle streak alone, and progress still resets it", () => {
     expect(step(active({ idleTurns: 2 }), { ...turn(true), progress: false, waiting: true }, T1)).toEqual({
-      goal: active({ idleTurns: 2, updatedAt: T1 }),
-      effect: { _tag: "None" },
+      goal: active({ idleTurns: 2, continueAt: 1_802_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 1_802_000 },
     })
     expect(step(active({ idleTurns: 2 }), { ...turn(true), waiting: true }, T1)).toEqual({
-      goal: active({ updatedAt: T1 }),
-      effect: { _tag: "None" },
+      goal: active({ continueAt: 1_802_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 1_802_000 },
     })
   })
 

@@ -313,8 +313,12 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
           note: `${EMPTY_TURN_LIMIT} consecutive turns produced no visible text or progress. Run /goal resume to continue.`,
         })
       }
-      // A running child session keeps the parent quiet until its ChildEnded arrives.
-      if (event.waiting) return update({ emptyTurns, idleTurns, ...RESET_STREAK })
+      // A running child session keeps the parent quiet until its ChildEnded arrives. The wait is
+      // still bounded at the cap so a child that never reports an end cannot freeze the goal.
+      if (event.waiting) {
+        const at = now + Math.max(continuationDelay(event.delayMs), IDLE_DELAY_CAP_MS)
+        return update({ emptyTurns, idleTurns, ...RESET_STREAK, continueAt: at }, { _tag: "Cooldown", at })
+      }
       const at = now + idleDelay(continuationDelay(event.delayMs), event.progress ? 0 : (goal.idleTurns ?? 0))
       return update({ emptyTurns, idleTurns, ...RESET_STREAK, continueAt: at }, { _tag: "Cooldown", at })
     }
