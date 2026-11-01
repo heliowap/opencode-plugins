@@ -54,3 +54,13 @@ One of `needs-triage` | `needs-info` | `ready-for-agent` | `ready-for-human` | `
 
 **Fold**:
 Closing an issue as `duplicate` whose acceptance criteria move into the absorbing issue's agent brief.
+
+### Working method
+
+**Ceremony**:
+A step whose cost is paid without protecting against a defect or an agent deviation: removing it changes no outcome and no decision. The verdict belongs to the step in its situation, never to a kind of step.
+_Avoid_: "overhead", "bureaucracy"; calling an expensive step that proves something ceremony, which is a matter of cost.
+
+**Brake**:
+A step that contains a named agent deviation: drift, hallucination, scope creep, under-delivery or unrelated work. It is judged by proportion: the deviation is possible here and the cost fits the risk.
+_Avoid_: calling a brake ceremony because it caught no defect.
