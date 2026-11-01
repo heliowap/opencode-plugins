@@ -123,23 +123,21 @@ policy route first, so asking for an Anthropic API model is routed, not
 rejected. Any other agent, such as `general`, is rejected. A subagent
 dispatched without `model` is not blocked, even when it inherits an Anthropic
 API model from its session. Commands and agent defaults that name an Anthropic
-API model, and background subagents resumed after a server restart, are not
-enforced either.
+API model are not enforced either.
 
 This plugin replaces model-routes: remove the model-routes entry from `plugins`
 when you install it.
 
 ## Coverage
 
-The plugin intercepts `subagent` via `execute.before`. These paths create child
-sessions without it and are not enforced:
+The plugin intercepts `subagent` via `execute.before`. Commands with
+`subagent: true` (or whose agent has `mode: subagent`) create child sessions
+without it, so they are not enforced: they use the command's `model`, then the
+agent's default model. Continuing a subagent by `sessionID`, including one
+started in the background, is an ordinary `subagent` call and stays enforced.
 
-- Commands with `subagent: true` (or whose agent has `mode: subagent`). They use
-  the command's `model`, then the agent's default model.
-- Background subagents resumed after a server restart.
-
-Set each agent's default `model` to its first route so these paths start on the
-right model.
+Set each agent's default `model` to its first route so these dispatches start
+on the right model.
 
 ## Install
 
