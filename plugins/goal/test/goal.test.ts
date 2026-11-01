@@ -394,9 +394,9 @@ describe("model updates", () => {
   })
 })
 
-describe("recovery after a restart (#3)", () => {
-  test("an active goal comes back paused", () => {
-    expect(step(active({ tokensUsed: 700 }), { _tag: "Recovered" }, T1)).toEqual({
+describe("recovery after a restart (#3, #9)", () => {
+  test("an active goal comes back paused when pauseOnRestart is set", () => {
+    expect(step(active({ tokensUsed: 700 }), { _tag: "Recovered", pauseOnRestart: true }, T1)).toEqual({
       goal: active({
         tokensUsed: 700,
         status: "paused",
@@ -407,9 +407,29 @@ describe("recovery after a restart (#3)", () => {
     })
   })
 
+  test("an active goal stays active and schedules the normal cooldown", () => {
+    expect(step(active({ tokensUsed: 700 }), { _tag: "Recovered", pauseOnRestart: false, delayMs: 120_000 }, T1)).toEqual({
+      goal: active({ tokensUsed: 700, continueAt: 122_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 122_000 },
+    })
+  })
+
+  test("the recovery cooldown honors the configured delay and its default", () => {
+    expect(step(active(), { _tag: "Recovered", pauseOnRestart: false, delayMs: 500 }, T1)).toEqual({
+      goal: active({ continueAt: 2_500, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 2_500 },
+    })
+    expect(step(active(), { _tag: "Recovered", pauseOnRestart: false }, T1)).toEqual({
+      goal: active({ continueAt: 122_000, updatedAt: T1 }),
+      effect: { _tag: "Cooldown", at: 122_000 },
+    })
+  })
+
   test.each([["paused"], ["blocked"], ["budget_limited"], ["complete"]] as const)("a %s goal is left as it was", (status) => {
     const goal = active({ status })
-    expect(step(goal, { _tag: "Recovered" }, T1)).toEqual({ goal, effect: { _tag: "None" } })
+    for (const pauseOnRestart of [true, false]) {
+      expect(step(goal, { _tag: "Recovered", pauseOnRestart }, T1)).toEqual({ goal, effect: { _tag: "None" } })
+    }
   })
 })
 

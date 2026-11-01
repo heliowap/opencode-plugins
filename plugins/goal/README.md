@@ -74,6 +74,7 @@ The agent can also create, read, and finish goals with the `goal_create`, `goal_
 - Token usage is counted from each model step (input, output, and reasoning tokens). Crossing `--tokens` marks the goal `budget_limited` and steers the agent to wrap up.
 - With `--verify "cmd"`, `goal_update` with `complete` first runs `cmd` with `sh -c` in the goal's directory. The goal completes only if it exits 0. Otherwise the goal stays open, the plugin counts the failed check, and the model gets the exit code and the end of the output. Interrupting the turn kills the command. Only the user can set the command: `goal_create` cannot, because a plugin tool cannot ask for `bash` permission per call.
 - A user interrupt pauses the goal. A turn that fails with an HTTP 5xx error, after OpenCode's own retries, is retried up to three times, 30 s, 2 min, and 5 min later; the goal stays active meanwhile. Any other failure, including a rate limit (429), and a fourth server error in a row block the goal so retries cannot loop.
+- After a server restart an active goal stays active and schedules its next turn after the usual continuation cooldown, since OpenCode already resumes the interrupted session. The `pauseOnRestart` plugin option (boolean, default `false`) restores the older behavior: the goal comes back `paused` until `/goal resume`.
 - Turns run by the `plan` agent neither count nor continue the goal.
 - A subagent that shows no activity for 10 minutes is interrupted, and its parent gets a queued `[goal] Watchdog:` notice. The `watchdogStallMs` plugin option sets that threshold in milliseconds. At the default threshold the watchdog checks every 60 s, so detection lands between 10 and 11 minutes after the last activity. It never interrupts a child with an open tool call, however long the call runs. If the interrupt itself fails, the notice says the child could not be interrupted and may still be running, so the parent checks it before redispatching.
 - The loop guard watches shell commands. The third identical command in a row (whitespace at the ends ignored) gets a loop warning appended to its result, telling the agent to change course instead of polling. It warns once per streak and never blocks a call. A file edit (`write`, `edit`, `patch`, `apply_patch`) or a subagent dispatch starts a new streak; reads and searches do not.
@@ -101,7 +102,7 @@ Either of these turns it off: the plugin option `"log": false`, or `OPENCODE_GOA
 
 ## Headless runs
 
-`opencode run` returns when its first turn ends. The server keeps continuing the goal after that, so a headless goal needs a server that outlives the command. `opencode run --standalone` stops its private server on exit, and the goal stops with it; it comes back paused the next time a server starts.
+`opencode run` returns when its first turn ends. The server keeps continuing the goal after that, so a headless goal needs a server that outlives the command. `opencode run --standalone` stops its private server on exit, and the goal stops with it; the next server that starts continues it (or pauses it, with `pauseOnRestart`).
 
 For CI, start a server, create the goal through `opencode run --server`, and poll the goal until it leaves `active`:
 

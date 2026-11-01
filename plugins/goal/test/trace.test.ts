@@ -123,7 +123,7 @@ describe("transitionRecord", () => {
       effect: "None",
       tokensUsed: 125,
     })
-    expect(transitionRecord("ses_1", { _tag: "Recovered" }, undefined, goal({ note: "fresh" }), { _tag: "None" }, AT)).toStrictEqual({
+    expect(transitionRecord("ses_1", { _tag: "Recovered", pauseOnRestart: true }, undefined, goal({ note: "fresh" }), { _tag: "None" }, AT)).toStrictEqual({
       at: AT, _tag: "Transition", sessionID: "ses_1",
       event: "Recovered",
       from: "none",
