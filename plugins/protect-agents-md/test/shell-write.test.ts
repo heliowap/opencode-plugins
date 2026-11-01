@@ -90,6 +90,13 @@ test("the time keyword's own options are skipped before the timed command", () =
   expect(flagsShellCommand("time -p cat AGENTS.md")).toBe(false)
 })
 
+test("a clustered shell option containing c takes the next argument as a command", () => {
+  expect(flagsShellCommand("bash -lc 'rm AGENTS.md'")).toBe(true)
+  expect(flagsShellCommand("zsh -fc 'rm AGENTS.md'")).toBe(true)
+  expect(flagsShellCommand("sh -ec 'rm AGENTS.md'")).toBe(true)
+  expect(flagsShellCommand("bash -lc 'cat AGENTS.md'")).toBe(false)
+})
+
 test("a VAR=value word after the command is an argument, not an assignment", () => {
   expect(flagsShellCommand("echo F=AGENTS.md; rm $F")).toBe(false)
   expect(flagsShellCommand("F=AGENTS.md; rm $F")).toBe(true)
