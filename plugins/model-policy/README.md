@@ -109,7 +109,10 @@ Exception: `anthropic/claude-sonnet-5-5` and `anthropic/claude-haiku-5-5` stay
 available through the Anthropic API. Models from other vendors, and OpenAI or
 Anthropic models served by the approved providers, are left untouched. Models
 defined in your `opencode.jsonc` are not removed by a catalog transform; only
-models OpenCode supplies are. The provider list and patterns are defined in
+models OpenCode supplies are. They are still covered at dispatch: a subagent
+call naming an `anthropic/` config model is rejected by the `execute.before`
+check described below, so config models survive the catalog but cannot be
+delegated to. The provider list and patterns are defined in
 [`src/routes.ts`](src/routes.ts).
 
 Anthropic API models are user-only. An `execute.before` hook rejects a
