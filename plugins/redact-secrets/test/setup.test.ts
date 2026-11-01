@@ -110,3 +110,11 @@ test("execute.after masks the secret inside an object error", () =>
     after(event as never)
     expect(event.error.message).toMatch(/^failed: \[REDACTED:[0-9a-f]{8}\]$/)
   }))
+
+test("execute.after masks the secret inside a string error", () =>
+  withSetup((hooks) => {
+    const after = hooks.get("tool.execute.after")!
+    const event = { tool: "read", status: "error", error: `connection failed: ${SECRET}` }
+    after(event as never)
+    expect(event.error).toMatch(/^connection failed: \[REDACTED:[0-9a-f]{8}\]$/)
+  }))
