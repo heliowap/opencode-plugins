@@ -159,7 +159,9 @@ describe("user controls", () => {
       host = await Host.start({
         script: (request) => {
           const results = toolResults(request).length
-          if (mentions(request, "BLOCKED-CASE")) {
+          // Once the goal is blocked its goal_context leaves the system text, so the session's
+          // later requests are identified by the recorded "Goal blocked." tool result (#7).
+          if (mentions(request, "BLOCKED-CASE") || mentions(request, "Goal blocked.")) {
             if (results === 0) return { tool: "goal_update", args: { status: "blocked", note: "still stuck" } }
             if (results === 1) return { tool: "goal_update", args: { status: "complete", note: "done" } }
             return { text: "Done." }
@@ -188,7 +190,7 @@ describe("user controls", () => {
       await host.prompt(idle, "no goal here")
       await host.settle(idle)
 
-      const blockedResults = toolResults(host.fixture.agentRequests().filter((request) => mentions(request, "BLOCKED-CASE")).at(-1)!)
+      const blockedResults = toolResults(host.fixture.agentRequests().filter((request) => mentions(request, "Goal blocked.")).at(-1)!)
       expect(blockedResults[0]).toBe("Goal blocked.")
       expect(toolError(blockedResults[1]!)).toBe(
         "The goal is blocked and cannot move to complete. Only the user can resume it with /goal resume; report the evidence to the user instead of calling goal_update again.",
