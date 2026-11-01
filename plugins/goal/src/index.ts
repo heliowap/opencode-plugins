@@ -580,7 +580,16 @@ export default Plugin.define({
       // A reload closes the previous scope and its pending retry and continuation waits.
       const startup = fresh
         ? forActiveGoals((sessionID) =>
-            transition(sessionID, { _tag: "Recovered", pauseOnRestart: pauseRecovered, delayMs: cooldownMs }),
+            ctx.session.get({ sessionID: sessionID as never }).pipe(
+              Effect.option,
+              // A session deleted while this location was not running leaves its goal behind;
+              // replay the quiet Clear its missed session.deleted event would have run.
+              Effect.flatMap((session) =>
+                session._tag === "Some"
+                  ? transition(sessionID, { _tag: "Recovered", pauseOnRestart: pauseRecovered, delayMs: cooldownMs })
+                  : transition(sessionID, { _tag: "Clear" }, { quiet: true }),
+              ),
+            ),
           )
         : Effect.all(
             [
