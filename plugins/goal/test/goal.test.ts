@@ -559,16 +559,20 @@ describe("idle turns back off and wait for child sessions (#6)", () => {
     })
   })
 
-  test("a waiting turn that made no progress still counts the idle turn", () => {
-    expect(step(active(), { ...turn(true), progress: false, waiting: true }, T1)).toEqual({
-      goal: active({ idleTurns: 1, updatedAt: T1 }),
+  test("a waiting turn leaves the idle streak alone, and progress still resets it", () => {
+    expect(step(active({ idleTurns: 2 }), { ...turn(true), progress: false, waiting: true }, T1)).toEqual({
+      goal: active({ idleTurns: 2, updatedAt: T1 }),
+      effect: { _tag: "None" },
+    })
+    expect(step(active({ idleTurns: 2 }), { ...turn(true), waiting: true }, T1)).toEqual({
+      goal: active({ updatedAt: T1 }),
       effect: { _tag: "None" },
     })
   })
 
   test("the third empty turn still blocks while a child session is running", () => {
     expect(step(active({ emptyTurns: 2, idleTurns: 2 }), { ...turn(false), waiting: true }, T1)).toEqual({
-      goal: active({ emptyTurns: 3, idleTurns: 3, status: "blocked", note: "3 consecutive turns produced no visible text or progress. Run /goal resume to continue.", updatedAt: T1 }),
+      goal: active({ emptyTurns: 3, idleTurns: 2, status: "blocked", note: "3 consecutive turns produced no visible text or progress. Run /goal resume to continue.", updatedAt: T1 }),
       effect: { _tag: "None" },
     })
   })

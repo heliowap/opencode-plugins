@@ -302,7 +302,8 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
     case "TurnEnded": {
       if (goal.status !== "active" || event.planning) return unchanged
       const emptyTurns = event.activity ? 0 : goal.emptyTurns + 1
-      const idleTurns = event.progress ? 0 : (goal.idleTurns ?? 0) + 1
+      // A turn suppressed by a live child is neither idle nor progress; the streak waits with it.
+      const idleTurns = event.progress ? 0 : event.waiting ? (goal.idleTurns ?? 0) : (goal.idleTurns ?? 0) + 1
       if (emptyTurns >= EMPTY_TURN_LIMIT) {
         return update({
           emptyTurns,
