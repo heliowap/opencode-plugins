@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { Database } from "bun:sqlite"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterToolResult, CONTINUATION, count } from "./harness/fixture.ts"
-import { Host } from "./harness/host.ts"
+import { Host, type Session } from "./harness/host.ts"
 
 const TIMEOUT = 180_000
 const complete = { tool: "goal_update", args: { status: "complete", note: "done" } } as const
@@ -84,6 +85,44 @@ describe("persistence", () => {
       await host.goal(session, "resume")
       await host.settle(session)
       expect(host.stored(session)).toMatchObject({ status: "complete" })
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "A12f a goal whose session vanished is cleared on recovery instead of looping forever (#9)",
+    async () => {
+      host = await Host.start({
+        script: (request) => (afterToolResult(request) ? { text: "Done." } : complete),
+      })
+      const session = await host.session()
+      await host.goal(session, "survive")
+      await host.until(() => host!.stored(session) !== undefined)
+
+      // A session deleted while its location was not running leaves its goal row behind; plant one
+      // by cloning the real row under a session id that does not exist.
+      const ghost: Session = { id: "ses_ghost" }
+      const db = new Database(join(host.root, "data", "opencode", "opencode.db"))
+      db.exec("pragma busy_timeout = 5000")
+      const row = db.query("select key, value from kv where key like ?").get(`plugin:%:goal/${session.id}`) as {
+        key: string
+        value: string
+      }
+      db.run("insert into kv (key, value, time_created, time_updated) values (?, ?, ?, ?)", [
+        row.key.replace(session.id, ghost.id),
+        row.value,
+        Date.now(),
+        Date.now(),
+      ])
+      db.close()
+      expect(host.stored(ghost)).toMatchObject({ status: "active" })
+
+      await host.restart()
+
+      await host.until(() => host!.stored(ghost) === undefined)
+      await host.until(() => host!.stored(session)?.status === "complete")
+      await host.settle(session)
+      expect(host.stored(session)).toMatchObject({ status: "complete", note: "done" })
     },
     TIMEOUT,
   )
