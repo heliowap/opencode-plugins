@@ -6,11 +6,13 @@ This project includes material adapted from OpenAI Codex
 Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
 
 Adapted files:
-- templates/continuation.md, templates/budget_limit.md and
+- templates/session_context.md, templates/budget_limit.md and
   templates/objective_updated.md, from codex-rs/ext/goal/templates/goals/
 - the goal tool descriptions in src/index.ts, from codex-rs/ext/goal/src/spec.rs
 
 Changes: tool names and wording were changed to match OpenCode
 (goal_update, todowrite, "session" instead of "thread"), and the
 completion note field, the optional verification section, and the
-definitions of each goal status were added.
+definitions of each goal status were added. templates/continuation.md was
+rewritten to carry only per-turn data; the adapted rules it used to hold
+moved into templates/session_context.md.
