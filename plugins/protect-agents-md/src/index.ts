@@ -13,12 +13,25 @@ import { flagsShellCommand } from "./shell-write.ts"
 const FILE_NAME = "agents.md"
 const QUESTION = "Do you want to proceed with editing AGENTS.md?"
 const YES = "Yes"
+const ASK = {
+  questions: [
+    {
+      header: "AGENTS.md edit",
+      question: QUESTION,
+      options: [
+        { label: YES, description: "apply the edit" },
+        { label: "No", description: "leave it unchanged" },
+      ],
+    },
+  ],
+}
+// The message leads with the action and carries the question tool input verbatim, so the agent
+// can copy it instead of assembling the call from prose.
 const MESSAGE = [
-  "AGENTS.md files are protected.",
-  `Ask the user with the question tool: header "AGENTS.md edit", question exactly "${QUESTION}",`,
-  `options "${YES}" (apply the edit) and "No" (leave it unchanged).`,
-  `Retry the edit only after the answer "${YES}". If you cannot use the question tool, report this to your parent.`,
-].join(" ")
+  `Stop and call the question tool with exactly this input, then retry only if the answer is "${YES}":`,
+  JSON.stringify(ASK),
+  "If you cannot use the question tool, report this to your parent.",
+].join("\n")
 
 interface QuestionInput {
   readonly questions?: ReadonlyArray<{ readonly question?: unknown }>

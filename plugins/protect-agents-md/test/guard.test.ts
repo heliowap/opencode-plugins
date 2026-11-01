@@ -6,7 +6,7 @@ import { Host } from "./harness/host.ts"
 
 const ORIGINAL = "# Global rules\n"
 const QUESTION = "Do you want to proceed with editing AGENTS.md?"
-const DENIED = "AGENTS.md files are protected"
+const DENIED = "Stop and call the question tool"
 type Step = { tool: string; args: Record<string, unknown> }
 type Plan = (dir: string) => Step[][]
 
