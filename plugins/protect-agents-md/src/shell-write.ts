@@ -303,9 +303,11 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
 
   const pushWord = (word: string) => {
     if (argv.length === 0 && KEYWORDS.has(word)) return
-    argv.push(word)
+    // Shells only take VAR=value words in command position; a "name=value" argument
+    // elsewhere (echo F=x) is data and must not feed variable expansion.
     const assign = /^([A-Za-z_]\w*)=(.*)$/s.exec(word)
-    if (assign) env.set(assign[1]!, assign[2]!)
+    if (assign && argv.every((arg) => /^[A-Za-z_]\w*=/.test(arg))) env.set(assign[1]!, assign[2]!)
+    argv.push(word)
   }
   const endCommand = (samePipeline: boolean) => {
     if (argv.length > 0 || redirects.length > 0 || bodies.length > 0 || pending.length > 0) {

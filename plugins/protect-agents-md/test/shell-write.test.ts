@@ -84,3 +84,8 @@ test("unparseable input falls back to the textual check", () => {
   expect(flagsShellCommand(`rm 'AGENTS.md`)).toBe(true)
   expect(flagsShellCommand(`cat 'AGENTS.md`)).toBe(false)
 })
+
+test("a VAR=value word after the command is an argument, not an assignment", () => {
+  expect(flagsShellCommand("echo F=AGENTS.md; rm $F")).toBe(false)
+  expect(flagsShellCommand("F=AGENTS.md; rm $F")).toBe(true)
+})
