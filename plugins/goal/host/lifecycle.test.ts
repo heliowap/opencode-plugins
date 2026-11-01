@@ -304,16 +304,18 @@ describe("lifecycle", () => {
       await host.prompt(child, CHILD)
       await host.goal(session, "wait for the child report")
 
-      // The parent's turn ends while the child is still answering (4 s delay): no continuation.
-      await host.until(() => host!.stored(session)?.idleTurns === 1)
+      // The parent's turn ends while the child is still answering (4 s delay): no continuation
+      // runs, the suppressed wait re-arms far out, and the idle streak does not grow.
+      await host.until(() => (host!.stored(session)?.continueAt ?? 0) - Date.now() > 1_500_000)
       await Bun.sleep(1_500)
+      expect(host.stored(session)).toMatchObject({ idleTurns: 0 })
       expect(host.fixture.agentRequests().filter((request) => !mentions(request, CHILD))).toHaveLength(1)
       expect(continuations(await host.messages(session))).toBe(1)
 
       // The child's end schedules the parent's one continuation, which completes the goal.
       await host.until(() => host!.stored(session)?.status === "complete")
       await host.settle(session)
-      expect(host.stored(session)).toMatchObject({ status: "complete", note: "child reported", idleTurns: 1 })
+      expect(host.stored(session)).toMatchObject({ status: "complete", note: "child reported", idleTurns: 0 })
       expect(host.fixture.agentRequests()).toHaveLength(4)
       expect(continuations(await host.messages(session))).toBe(2)
     },
