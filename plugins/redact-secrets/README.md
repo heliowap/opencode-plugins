@@ -16,27 +16,39 @@ and replaces matches with a `[REDACTED:<id>]` placeholder:
   environment variables whose names match `API_KEY`, `APIKEY`, `TOKEN`,
   `SECRET`, `PASSWORD`, `PASSWD` or `CREDENTIAL` (case-insensitive), and masks
   any occurrence of those values.
+- **Project dotfiles.** It also reads `.env` and `.env.*` files in the session
+  directory (`.env.example` is skipped) and adds their values to the
+  known-secret set, so a project's own credentials are masked wherever they
+  appear in tool output — even without their key.
 - **Secret-looking fields.** It masks the value in key/value text such as
-  `api_key=...`, `"password": "..."` or `Authorization: Bearer ...`, for the keys
-  `api_key`/`apikey`, `authorization`, `password`, `secret` and `token`
-  (optionally prefixed by `access_`, `refresh_`, `auth_` or `id_`). The key is
+  `api_key=...`, `"password": "..."` or `Authorization: Bearer ...`, for any key
+  whose name contains `KEY`, `PASS`, `PWD`, `SECRET`, `TOKEN`, `CRYPT`,
+  `PRIVATE`, `CREDENTIAL` or `AUTH` (case-insensitive) — for example
+  `SMTP_PASS`, `APP_CRYPT_KEY` or `CERT_PASSWORD_ENCRYPTION_KEY`. The key is
   kept; only the value is replaced, and only when the value looks like a
   literal credential rather than an expression or a reference.
+- **URL credentials.** In a URL with userinfo such as
+  `mysql://root:pass@host/db`, only the password is replaced:
+  `mysql://root:[REDACTED:<id>]@host/db`.
 
 ## Limits
 
-- Environment variable values shorter than 12 characters are not masked.
-- Environment variables are read once, when the plugin starts.
-- A field value is masked only when the whole key is one of the names above
-  (substrings inside longer identifiers, such as `knownSecret` or
-  `sessionToken`, never match) and the value is at least 8 characters.
-- A field value is masked only when it looks like a literal. A value is left
-  alone when it contains whitespace, quotes, `,`, `;` or any of `( ) [ ] { }`;
-  when it starts with `$`, `${`, `${{`, `{env:` or `process.env`; or when it is
-  a dotted identifier chain such as `secrets.length` or `os.environ`. Code and
-  config references keep their text instead of showing a placeholder.
-- Secrets in any other shape (for example a bare token with no key, or a key
-  name outside the list) pass through unchanged.
+- Environment and dotfile values shorter than 12 characters are not masked.
+- Environment variables and project dotfiles are read once, when the plugin
+  starts; later edits to a `.env` file are not picked up.
+- Dotfile values are collected only when the variable name contains a secret
+  marker (`KEY`, `PASS`, `PWD`, `SECRET`, `TOKEN`, `CRYPT`, `PRIVATE`,
+  `CREDENTIAL` or `AUTH`), so `PORT` or `NODE_ENV` values are never tracked.
+- A field value is masked only when the key name contains one of the markers
+  above and the value looks like a literal. A value is left alone when it
+  contains whitespace, quotes, `,`, `;` or any of `( ) [ ] { }`; when it starts
+  with `$`, `${`, `${{`, `{env:` or `process.env`; or when it is a dotted
+  identifier chain such as `secrets.length` or `os.environ`. Code and config
+  references keep their text instead of showing a placeholder.
+- URL passwords are masked at 8 characters or more; the scheme, user, host and
+  path stay readable.
+- Secrets in any other shape (for example a bare token with no key and no
+  matching dotfile or environment value) pass through unchanged.
 
 ## Install
 
