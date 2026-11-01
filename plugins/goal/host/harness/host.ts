@@ -197,11 +197,12 @@ export class Host {
     return text ? JSON.parse(text) : undefined
   }
 
-  async session(agent = "build"): Promise<Session> {
+  async session(agent = "build", parentID?: string): Promise<Session> {
     const created = (await this.json("POST", "/api/session", {
       agent,
       model: this.model,
       location: { directory: this.project },
+      ...(parentID !== undefined && { parentID }),
     })) as { id?: string; data?: { id: string } }
     return { id: created.id ?? created.data!.id }
   }
