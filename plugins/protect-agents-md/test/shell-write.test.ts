@@ -136,6 +136,13 @@ test("ssh -o options that run a local command are judged", () => {
   expect(flagsShellCommand("ssh -o ProxyCommand='cat AGENTS.md' host")).toBe(false)
 })
 
+test("a write API path variable assigned AGENTS.md in the same script flags", () => {
+  expect(flagsShellCommand(`python3 -c "f='AGENTS.md'; open(f,'w').write('x')"`)).toBe(true)
+  expect(flagsShellCommand(`python3 -c "f='AGENTS.md'; open(f,'r').read()"`)).toBe(false)
+  expect(flagsShellCommand(`python3 -c "f='notes.md'; open(f,'w').write('x')"`)).toBe(false)
+  expect(flagsShellCommand(`python3 -c "open('f','w').write('x'); f='AGENTS.md'"`)).toBe(false)
+})
+
 test("a VAR=value word after the command is an argument, not an assignment", () => {
   expect(flagsShellCommand("echo F=AGENTS.md; rm $F")).toBe(false)
   expect(flagsShellCommand("F=AGENTS.md; rm $F")).toBe(true)
