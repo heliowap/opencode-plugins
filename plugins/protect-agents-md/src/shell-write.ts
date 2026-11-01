@@ -725,15 +725,22 @@ const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: str
   if (simple.redirects.some((redirect) => redirect.write && NAMES.test(redirect.target))) return true
   const names = (word: string) => NAMES.test(word)
   const position = stages.indexOf(simple)
-  const stdinNames = stages
-    .slice(0, position)
-    .filter((stage) => stage.pipeline === simple.pipeline)
-    .some((stage) => stage.argv.some(names))
+  const earlier = stages.slice(0, position).filter((stage) => stage.pipeline === simple.pipeline)
+  const stdinNames = earlier.some((stage) => stage.argv.some(names))
   if (flagsExec(simple.argv, stdinNames, run)) return true
+  if (stdinRunner(simple)) {
+    // The heredoc overrides piped stdin. Otherwise the pipeline's output is this command's
+    // program text: the earlier stages' arguments are the words it may execute, judged
+    // command by command rather than as one loose line.
+    if (simple.heredocs.length > 0) return simple.heredocs.some((body) => run(body))
+    return earlier.some((stage) => {
+      const { args } = unwrap(stage.argv)
+      return args.length > 0 && run(args.join(" "))
+    })
+  }
   if (simple.heredocs.length === 0) return false
-  const executed =
-    stdinRunner(simple) || stages.slice(position + 1).some((stage) => stage.pipeline === simple.pipeline && stdinRunner(stage))
-  return executed && simple.heredocs.some((body) => run(body))
+  const downstream = stages.slice(position + 1).some((stage) => stage.pipeline === simple.pipeline && stdinRunner(stage))
+  return downstream && simple.heredocs.some((body) => run(body))
 }
 
 const analyze = (text: string, env: Env): boolean => {
