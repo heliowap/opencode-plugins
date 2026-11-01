@@ -58,3 +58,29 @@ test.each([
 ])("flags the write %j", (command) => {
   expect(flagsShellCommand(command)).toBe(true)
 })
+
+// Quoting-aware checks: a writer word or the AGENTS.md name inside a quoted argument of a
+// non-writer does not count; only a writer's own arguments, a write API's path, or a local
+// redirect target do.
+test("a writer name inside a quoted grep pattern is not flagged", () => {
+  expect(flagsShellCommand(`grep -n 'deploy\\|AGENTS.md\\|cp \\|cat ' .github/workflows/ci.yml`)).toBe(false)
+  expect(flagsShellCommand("cp notes.md AGENTS.md")).toBe(true)
+})
+
+test("a script line that writes another file while mentioning AGENTS.md as data is not flagged", () => {
+  const data =
+    `python3 -c "import json,pathlib; (pathlib.Path('out')/'snapshot.json').write_text(json.dumps({'protected': 'Do not alter AGENTS.md/CLAUDE.md here'}))"`
+  expect(flagsShellCommand(data)).toBe(false)
+  expect(flagsShellCommand(`python3 -c "import pathlib; pathlib.Path('out/AGENTS.md').write_text('x')"`)).toBe(true)
+})
+
+test("a remote ssh command is not flagged", () => {
+  expect(flagsShellCommand("ssh host 'cp -p ~/.config/opencode/AGENTS.md ~/.config/opencode/AGENTS.md.bak-$ts'")).toBe(false)
+  expect(flagsShellCommand("ssh host cp -p ~/.config/opencode/AGENTS.md ~/.config/opencode/AGENTS.md.bak-$ts")).toBe(false)
+  expect(flagsShellCommand("cp -p ~/.config/opencode/AGENTS.md ~/.config/opencode/AGENTS.md.bak")).toBe(true)
+})
+
+test("unparseable input falls back to the textual check", () => {
+  expect(flagsShellCommand(`rm 'AGENTS.md`)).toBe(true)
+  expect(flagsShellCommand(`cat 'AGENTS.md`)).toBe(false)
+})

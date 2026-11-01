@@ -1,7 +1,11 @@
-// Shell commands are flagged only when their raw text shows a write to an AGENTS.md file; every
-// other command runs. The scan is textual and ignores quoting, so a quoted ">" or writer name next
-// to AGENTS.md is still flagged. Writes hidden behind indirection the text does not show (a path
-// built at runtime, a script file) are out of scope here; the process guard covers those.
+// Shell commands are flagged only when they show a write to an AGENTS.md file; every other
+// command runs. The command is tokenized with quote and heredoc awareness and each simple
+// command is judged on its own argv: a writer word or an AGENTS.md mention inside a quoted
+// argument of another tool (a grep pattern, an echo string, an ssh remote command) does not
+// count, and a write API in a script line counts only when its path expression names the file.
+// When the text cannot be lexed, the textual scan at the bottom decides instead. Writes hidden
+// behind indirection the text does not show (a path computed at runtime, a script file) are out
+// of scope here; the process guard covers those.
 const FILE = String.raw`(?:[^\s;&|<>()'"]*/)?agents\.md(?![^\s;&|<>()'"])`
 const TARGET = String.raw`(?:"(?:[^"]*/)?agents\.md"|'(?:[^']*/)?agents\.md'|${FILE})`
 const MENTION = /agents\.md/i
@@ -35,7 +39,9 @@ const expandMentions = (command: string): string => {
 // Splits on newlines and on ; && || & but keeps | pipelines together, so "... AGENTS.md | xargs rm" stays one unit.
 const commandsOf = (command: string): string[] => command.split(/\n|;|&&|\|\||(?<![>&|])&(?![>&])/)
 
-export const flagsShellCommand = (command: string): boolean => {
+// The pre-tokenizer scan: it works on raw text and ignores quoting, so it stays the fail-closed
+// verdict for input the lexer cannot read.
+const flagsTextualCommand = (command: string): boolean => {
   const expanded = expandMentions(command)
   if (!MENTION.test(expanded)) return false
   if (REDIRECT.test(expanded) || OUTPUT_OPTION.test(expanded) || SED_WRITE.test(expanded)) return true
@@ -43,4 +49,475 @@ export const flagsShellCommand = (command: string): boolean => {
   return commandsOf(expanded).some(
     (part) => MENTION.test(part) && (WRITERS.test(part) || IN_PLACE.test(part) || GIT_WRITE.test(part) || FIND_ACTION.test(part)),
   )
+}
+
+// A cooked word or a script expression names AGENTS.md when it carries the file name in any
+// letter case next to a non-word, non-dot boundary. "AGENTS.md.bak", "AGENTS.md.orig" and
+// "myAGENTS.md" are different files and do not count.
+const NAMES = /(?:^|[^\w.])agents\.md(?:$|[^\w.])/i
+// Quoted string literals in script text keep their quotes, so they need the textual TARGET too.
+const exprNames = (text: string) => NAMES.test(text) || new RegExp(TARGET, "i").test(text)
+
+// A write API call flags only when its path expression names AGENTS.md; the name anywhere else
+// in the call (a data string, a second argument that is not a path) does not count.
+const EXPR = String.raw`[^,()]*(?:\([^()]*\)[^,()]*)*`
+const RECEIVER = String.raw`(?:[A-Za-z_][\w.]*\s*\((?:[^()]|\([^()]*\))*\)|\((?:[^()]|\([^()]*\))*\)|[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)`
+const METHOD_WRITE = new RegExp(String.raw`(${RECEIVER})\s*\.\s*(?:write_text|write_bytes|unlink|touch|rename|replace)\s*\(`, "g")
+const RENAME_TARGET = new RegExp(String.raw`\.\s*rename\s*\(\s*(${EXPR})`, "g")
+const OPEN_WRITE = new RegExp(String.raw`\bopen\s*\(\s*(${EXPR})\s*,\s*(?:mode\s*=\s*)?["']?[^,"'()\s]*[wax+]`, "g")
+const PATH_WRITE = new RegExp(
+  String.raw`\b(?:writeFileSync|appendFileSync|writeFile|appendFile|createWriteStream|rmSync|unlinkSync|os\.(?:remove|unlink)|shutil\.rmtree|Bun\.write|unlink)\s*\(?\s*(${EXPR})`,
+  "g",
+)
+const COPY_WRITE = new RegExp(String.raw`\b(?:renameSync|copyFileSync|os\.(?:rename|replace)|shutil\.(?:copy\w*|move))\s*\(\s*(${EXPR})\s*,\s*(${EXPR})`, "g")
+// Shell-out APIs carry a nested shell command; the call's quoted strings become its argv.
+const SHELL_OUT = /\b(?:os\.system|subprocess\.\w+|system|exec|spawn|popen)\s*\(([^)]*)\)/g
+
+// Commands whose argv[0] wraps another command; option-with-value arguments are skipped so the
+// wrapped command becomes argv[0]. env and sudo also take VAR=value words, timeout takes a
+// duration.
+const WRAPPERS: Record<string, { opts: ReadonlySet<string>; assigns?: boolean; positional?: number }> = {
+  sudo: {
+    opts: new Set(["-u", "-g", "-h", "-p", "-C", "-T", "-D", "-R", "--user", "--group", "--host", "--prompt", "--chdir", "--role", "--type"]),
+    assigns: true,
+  },
+  doas: { opts: new Set(["-u"]) },
+  pkexec: { opts: new Set(["--user"]) },
+  env: { opts: new Set(["-u", "--unset", "-C", "--chdir", "-S", "--split-string"]), assigns: true },
+  exec: { opts: new Set(["-a", "--argv0"]) },
+  command: { opts: new Set() },
+  builtin: { opts: new Set() },
+  nice: { opts: new Set(["-n", "--adjustment"]) },
+  ionice: { opts: new Set(["-c", "-n", "-p", "--class", "--classdata", "--pid"]) },
+  nohup: { opts: new Set() },
+  timeout: { opts: new Set(["-s", "--signal", "-k", "--kill-after"]), positional: 1 },
+  watch: { opts: new Set(["-n", "--interval"]) },
+  stdbuf: { opts: new Set(["-i", "-o", "-e", "--input", "--output", "--error"]) },
+  sshpass: { opts: new Set(["-p", "-f", "-d", "-o", "--option"]) },
+}
+const WRITER_NAMES = new Set(WRITER.slice("(?:".length, -1).split("|"))
+const IN_PLACE_CMDS = new Set(["sed", "perl", "ruby", "gsed"])
+const IN_PLACE_FLAG = /^-[a-zA-Z]*i|^--in-place/
+const GIT_SUBS = new Set(["checkout", "restore", "rm", "mv", "apply", "stash", "reset"])
+const FIND_ACTIONS = new Set(["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"])
+const SHELL_CMDS = new Set(["sh", "bash", "zsh", "dash", "ksh", "ash", "fish", "su"])
+const XARGS_OPTS = new Set([
+  "-I", "-J", "-L", "-n", "-P", "-s", "-E", "-e", "-d", "-a",
+  "--arg-file", "--delimiter", "--eof", "--max-args", "--max-chars", "--max-lines", "--max-procs", "--replace", "--process-slot-var",
+])
+// Shell grammar words that open a command position without being commands themselves.
+const KEYWORDS = new Set(["if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done", "case", "esac", "select", "function", "time", "coproc", "!"])
+
+interface Redirect {
+  readonly write: boolean
+  readonly target: string
+}
+interface Simple {
+  readonly argv: string[]
+  readonly redirects: Redirect[]
+  readonly heredocs: string[]
+  readonly pipeline: number
+}
+type Env = Map<string, string>
+type Nested = (text: string) => void
+
+const basenameOf = (word: string) => word.slice(word.lastIndexOf("/") + 1)
+
+// Reads a balanced "(…)" group starting at text[i] (just past the opening paren), honoring
+// quotes and escapes so a paren inside a string does not close it. Throws on unterminated input.
+const captureParens = (text: string, i: number): [inner: string, next: number] => {
+  const start = i
+  let depth = 1
+  while (i < text.length) {
+    const c = text[i]!
+    if (c === "\\") {
+      i += 2
+      continue
+    }
+    if (c === "'" || c === '"' || c === "`") {
+      const end = text.indexOf(c, i + 1)
+      if (end < 0) throw new Error("unterminated quote")
+      i = end + 1
+      continue
+    }
+    if (c === "(") depth++
+    if (c === ")") {
+      depth--
+      if (depth === 0) return [text.slice(start, i), i + 1]
+    }
+    i++
+  }
+  throw new Error("unterminated substitution")
+}
+
+// Reads $NAME, ${NAME}, `…`, $(…) and $((…)) at text[i]. Substituted commands are reported to
+// `nested` and kept verbatim in the word; variables expand from env or stay literal.
+const readDollar = (text: string, i: number, env: Env, nested: Nested): [piece: string, next: number] => {
+  if (text[i] === "`") {
+    const end = text.indexOf("`", i + 1)
+    if (end < 0) throw new Error("unterminated backtick")
+    nested(text.slice(i + 1, end))
+    return [text.slice(i, end + 1), end + 1]
+  }
+  const after = text[i + 1]
+  if (after === "{") {
+    const end = text.indexOf("}", i + 2)
+    if (end < 0) throw new Error("unterminated expansion")
+    const inner = text.slice(i + 2, end)
+    const name = /^#?([A-Za-z_]\w*)$/.exec(inner)?.[1]
+    return [name !== undefined && env.has(name) ? env.get(name)! : text.slice(i, end + 1), end + 1]
+  }
+  if (after === "(") {
+    const [inner, next] = captureParens(text, i + 2)
+    // "$( (" is an arithmetic expansion: its content is not run as commands.
+    if (!inner.startsWith("(")) nested(inner)
+    return [text.slice(i, next), next]
+  }
+  const name = /^[A-Za-z_]\w*/.exec(text.slice(i + 1))?.[0]
+  if (name === undefined) return ["$", i + 1]
+  return [env.get(name) ?? text.slice(i, i + 1 + name.length), i + 1 + name.length]
+}
+
+// Cooks one word starting at text[i]: removes quotes, resolves escapes, expands $NAME and
+// ${NAME} from env, and reports $(…), `…`, <(…) and >(…) to `nested`. Returns the cooked word
+// and the index of the delimiter that ended it, which the caller owns.
+const readWord = (text: string, i: number, env: Env, nested: Nested): [word: string, next: number] => {
+  let word = ""
+  while (i < text.length) {
+    const c = text[i]!
+    if (" \t\n;&|<>".includes(c)) break
+    if (c === "\\") {
+      if (i + 1 >= text.length) throw new Error("trailing backslash")
+      if (text[i + 1] !== "\n") word += text[i + 1]
+      i += 2
+      continue
+    }
+    if (c === "'") {
+      const end = text.indexOf("'", i + 1)
+      if (end < 0) throw new Error("unterminated quote")
+      word += text.slice(i + 1, end)
+      i = end + 1
+      continue
+    }
+    if (c === '"') {
+      i++
+      let closed = false
+      while (i < text.length) {
+        const d = text[i]!
+        if (d === '"') {
+          closed = true
+          i++
+          break
+        }
+        if (d === "\\" && i + 1 < text.length && '$`"\\\n'.includes(text[i + 1]!)) {
+          if (text[i + 1] !== "\n") word += text[i + 1]
+          i += 2
+          continue
+        }
+        if (d === "$" || d === "`") {
+          const [piece, next] = readDollar(text, i, env, nested)
+          word += piece
+          i = next
+          continue
+        }
+        word += d
+        i++
+      }
+      if (!closed) throw new Error("unterminated quote")
+      continue
+    }
+    if (c === "$" || c === "`") {
+      const [piece, next] = readDollar(text, i, env, nested)
+      word += piece
+      i = next
+      continue
+    }
+    word += c
+    i++
+  }
+  return [word, i]
+}
+
+// Reads a redirection operator plus its target at text[i]; text[i] is "<" or ">". Heredoc
+// delimiters are queued for the caller to consume at the end of the line; here-strings return
+// their data word as an inline body.
+const readRedirect = (
+  text: string,
+  i: number,
+  env: Env,
+  nested: Nested,
+): [redirect: Redirect | undefined, heredoc: { delim: string; stripTabs: boolean } | undefined, body: string | undefined, next: number] => {
+  let op = text[i]!
+  i++
+  const c = text[i]
+  if (op === ">") {
+    if (c === ">") {
+      op = ">>"
+      i++
+    } else if (c === "|" || c === "&") {
+      op += c
+      i++
+    }
+  } else if (c === "<") {
+    op = "<<"
+    i++
+    if (text[i] === "<") {
+      op = "<<<"
+      i++
+    } else if (text[i] === "-") {
+      op = "<<-"
+      i++
+    }
+  } else if (c === ">" || c === "&") {
+    op += c
+    i++
+  }
+  while (text[i] === " " || text[i] === "\t") i++
+  if (op === "<<" || op === "<<-") {
+    const [delim, next] = readWord(text, i, env, nested)
+    if (!delim) throw new Error("heredoc without delimiter")
+    return [undefined, { delim, stripTabs: op === "<<-" }, undefined, next]
+  }
+  if ((text[i] === "<" || text[i] === ">") && text[i + 1] === "(") {
+    // A process substitution as the redirect target: the inside is a nested command.
+    const [inner, next] = captureParens(text, i + 2)
+    nested(inner)
+    return [{ write: op.includes(">"), target: text.slice(i, next) }, undefined, undefined, next]
+  }
+  const [target, next] = readWord(text, i, env, nested)
+  if (!target) throw new Error("redirect without a target")
+  if (op === "<<<") return [undefined, undefined, target, next]
+  return [{ write: op.includes(">"), target }, undefined, undefined, next]
+}
+
+// Splits the command text into simple commands. Pipeline stages share a pipeline id; heredoc
+// bodies are collected raw, per owning command, when each command line ends.
+const lex = (text: string, env: Env, nested: Nested): Simple[] => {
+  const commands: Simple[] = []
+  let argv: string[] = []
+  let redirects: Redirect[] = []
+  let bodies: string[] = []
+  let pending: { delim: string; stripTabs: boolean; sink: string[] }[] = []
+  let pipeline = 0
+  let i = 0
+
+  const pushWord = (word: string) => {
+    if (argv.length === 0 && KEYWORDS.has(word)) return
+    argv.push(word)
+    const assign = /^([A-Za-z_]\w*)=(.*)$/s.exec(word)
+    if (assign) env.set(assign[1]!, assign[2]!)
+  }
+  const endCommand = (samePipeline: boolean) => {
+    if (argv.length > 0 || redirects.length > 0 || bodies.length > 0 || pending.length > 0) {
+      commands.push({ argv, redirects, heredocs: bodies, pipeline })
+    }
+    if (!samePipeline) pipeline++
+    argv = []
+    redirects = []
+    bodies = []
+  }
+  const consumeHeredocs = () => {
+    for (const h of pending) {
+      const lines: string[] = []
+      let closed = false
+      while (i < text.length) {
+        const end = text.indexOf("\n", i)
+        const line = end < 0 ? text.slice(i) : text.slice(i, end)
+        if ((h.stripTabs ? line.replace(/^\t+/, "") : line) === h.delim) {
+          closed = true
+          i = end < 0 ? text.length : end + 1
+          break
+        }
+        lines.push(line)
+        if (end < 0) {
+          i = text.length
+          break
+        }
+        i = end + 1
+      }
+      if (!closed) throw new Error("unterminated heredoc")
+      h.sink.push(lines.join("\n"))
+    }
+    pending = []
+  }
+
+  while (i < text.length) {
+    const c = text[i]!
+    if (c === " " || c === "\t") {
+      i++
+      continue
+    }
+    if (c === "\n") {
+      i++
+      endCommand(false)
+      consumeHeredocs()
+      continue
+    }
+    if (c === "#") {
+      const end = text.indexOf("\n", i)
+      i = end < 0 ? text.length : end
+      continue
+    }
+    if (c === ";") {
+      endCommand(false)
+      i++
+      continue
+    }
+    if (c === "&") {
+      if (text[i + 1] === "&") {
+        endCommand(false)
+        i += 2
+        continue
+      }
+      if (text[i + 1] === ">") {
+        const [redirect, , , next] = readRedirect(text, i + 1, env, nested)
+        i = next
+        if (redirect) redirects.push(redirect)
+        continue
+      }
+      endCommand(false)
+      i++
+      continue
+    }
+    if (c === "|") {
+      if (text[i + 1] === "|") {
+        endCommand(false)
+        i += 2
+        continue
+      }
+      endCommand(true)
+      i += text[i + 1] === "&" ? 2 : 1
+      continue
+    }
+    if (c === "(" || c === ")" || c === "{" || c === "}") {
+      endCommand(false)
+      i++
+      continue
+    }
+    if (c === "<" || c === ">") {
+      if (text[i + 1] === "(") {
+        // "<(…)" and ">(…)" are process substitutions: the inside is a command, the whole
+        // substitution is a word.
+        const [inner, next] = captureParens(text, i + 2)
+        nested(inner)
+        pushWord(text.slice(i, next))
+        i = next
+        continue
+      }
+      const [redirect, heredoc, body, next] = readRedirect(text, i, env, nested)
+      i = next
+      if (redirect) redirects.push(redirect)
+      if (heredoc) pending.push({ ...heredoc, sink: bodies })
+      if (body !== undefined) bodies.push(body)
+      continue
+    }
+    const [word, next] = readWord(text, i, env, nested)
+    i = next
+    // A bare number right before < or > is the redirection's fd, not an argument.
+    if (/^\d+$/.test(word) && i < text.length && (text[i] === "<" || text[i] === ">")) {
+      const [redirect, heredoc, body, after] = readRedirect(text, i, env, nested)
+      i = after
+      if (redirect) redirects.push(redirect)
+      if (heredoc) pending.push({ ...heredoc, sink: bodies })
+      if (body !== undefined) bodies.push(body)
+      continue
+    }
+    pushWord(word)
+  }
+  endCommand(false)
+  if (pending.length > 0) throw new Error("unterminated heredoc")
+  return commands
+}
+
+// Turns a shell-out call's arguments into command text: a single quoted string is the command
+// line itself, several strings are the argv, and a bare expression is used as-is.
+const shellText = (call: string): string => {
+  const parts = [...call.matchAll(/'([^'\\]*)'|"([^"\\]*)"/g)].map((match) => match[1] ?? match[2] ?? "")
+  if (parts.length === 1) return parts[0]!
+  return parts.length > 1 ? parts.map((part) => JSON.stringify(part)).join(" ") : call.trim()
+}
+
+// A write API call in script text flags only when its own path expression names AGENTS.md.
+const scriptFlags = (text: string, run: (inner: string) => boolean): boolean => {
+  for (const match of text.matchAll(METHOD_WRITE)) if (exprNames(match[1]!)) return true
+  for (const match of text.matchAll(RENAME_TARGET)) if (exprNames(match[1]!)) return true
+  for (const match of text.matchAll(OPEN_WRITE)) if (exprNames(match[1]!)) return true
+  for (const match of text.matchAll(PATH_WRITE)) if (exprNames(match[1]!)) return true
+  for (const match of text.matchAll(COPY_WRITE)) if (exprNames(match[1]!) || exprNames(match[2]!)) return true
+  for (const match of text.matchAll(SHELL_OUT)) if (run(shellText(match[1]!))) return true
+  return false
+}
+
+// Drops leading VAR=value words and command wrappers (sudo, env, nice, …) so argv[0] is the
+// command that actually runs.
+const unwrap = (argv: readonly string[]): { cmd: string; args: readonly string[] } => {
+  let i = 0
+  for (;;) {
+    if (/^[A-Za-z_]\w*=/.test(argv[i] ?? "")) {
+      i++
+      continue
+    }
+    const wrapper = WRAPPERS[basenameOf(argv[i] ?? "")]
+    if (wrapper === undefined) return { cmd: basenameOf(argv[i] ?? ""), args: argv.slice(i + 1) }
+    i++
+    while (i < argv.length && argv[i]!.startsWith("-")) i += wrapper.opts.has(argv[i]!) ? 2 : 1
+    while (wrapper.assigns === true && i < argv.length && /^[A-Za-z_]\w*=/.test(argv[i]!)) i++
+    i += wrapper.positional ?? 0
+  }
+}
+
+const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: string) => boolean): boolean => {
+  if (simple.redirects.some((redirect) => redirect.write && NAMES.test(redirect.target))) return true
+  const { cmd, args } = unwrap(simple.argv)
+  // The remote command of ssh runs on another machine; only its local redirects count.
+  if (cmd === "ssh") return false
+  const names = (word: string) => NAMES.test(word)
+  // A shell's "-c" argument carries a nested command.
+  const cIndex = SHELL_CMDS.has(cmd) ? args.findIndex((arg) => arg === "-c") : -1
+  if (cIndex >= 0 && args[cIndex + 1] !== undefined && run(args[cIndex + 1]!)) return true
+  if (WRITER_NAMES.has(cmd) && args.some(names)) return true
+  if (cmd === "xargs") {
+    // xargs gets its arguments from the pipe: "… AGENTS.md | xargs rm" removes them.
+    let j = 0
+    while (j < args.length && args[j]!.startsWith("-")) j += XARGS_OPTS.has(args[j]!) ? 2 : 1
+    if (WRITER_NAMES.has(basenameOf(args[j] ?? ""))) {
+      const earlier = stages.slice(0, stages.indexOf(simple)).filter((stage) => stage.pipeline === simple.pipeline)
+      if (args.some(names) || earlier.some((stage) => stage.argv.some(names))) return true
+    }
+  }
+  if (IN_PLACE_CMDS.has(cmd) && args.some((arg) => IN_PLACE_FLAG.test(arg)) && args.some(names)) return true
+  if ((cmd === "sed" || cmd === "gsed") && args.some((arg) => /(?:^|[\s;'"/0-9p])w\s+\S*agents\.md(?:$|[^\w.])/i.test(arg))) return true
+  if (cmd === "git" && args.some((arg) => GIT_SUBS.has(arg)) && args.some(names)) return true
+  if (cmd === "find" && args.some((arg) => FIND_ACTIONS.has(arg)) && args.some(names)) return true
+  if (
+    args.some(
+      (arg, index) =>
+        (arg === "--output" && names(args[index + 1] ?? "")) ||
+        (arg.startsWith("--output=") && names(arg.slice("--output=".length))) ||
+        (cmd === "sort" && arg === "-o" && names(args[index + 1] ?? "")) ||
+        (cmd === "sort" && /^-o.+/.test(arg) && names(arg.slice(2))),
+    )
+  )
+    return true
+  if (simple.argv.some((word) => scriptFlags(word, run))) return true
+  return simple.heredocs.some((body) => run(body))
+}
+
+const analyze = (text: string, env: Env): boolean => {
+  let nested = false
+  const run = (inner: string) => {
+    const flagged = analyze(inner, env)
+    if (flagged) nested = true
+    return flagged
+  }
+  const commands = lex(text, env, run)
+  return nested || commands.some((simple) => flagsSimple(simple, commands, run))
+}
+
+export const flagsShellCommand = (command: string): boolean => {
+  try {
+    return analyze(command, new Map())
+  } catch {
+    return flagsTextualCommand(command)
+  }
 }
