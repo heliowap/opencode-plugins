@@ -7,10 +7,11 @@ them or the session stores them.
 
 ## What it does
 
-The plugin registers a tool `execute.after` hook. For a completed tool call it
-redacts the result; for a failed call it redacts the error (when the error is a
-plain object). Redaction walks strings, arrays and plain objects recursively
-and replaces matches with a `[REDACTED:<id>]` placeholder:
+The plugin registers tool `execute.after` and `execute.before` hooks. For a
+completed tool call it redacts the result; for a failed call it redacts the
+error (when the error is a plain object). Redaction walks strings, arrays and
+plain objects recursively and replaces matches with a `[REDACTED:<id>]`
+placeholder:
 
 - **Known environment secrets.** At startup it collects the values of
   environment variables whose names match `API_KEY`, `APIKEY`, `TOKEN`,
@@ -31,6 +32,28 @@ and replaces matches with a `[REDACTED:<id>]` placeholder:
   `mysql://root:pass@host/db`, only the password is replaced:
   `mysql://root:[REDACTED:<id>]@host/db`.
 
+## Placeholders
+
+Every masked value becomes `[REDACTED:<id>]`, where `<id>` is the first 8 hex
+characters of an HMAC of the value under a key generated when the plugin
+starts. The plugin keeps an in-memory map from id to value, so within one
+server process the same value always gets the same id and each placeholder can
+be resolved back.
+
+Because the model only ever sees masked text, the `execute.before` hook keeps
+placeholders from being written to disk:
+
+- For `edit`, `write`, `patch` and `apply_patch` inputs, every known
+  `[REDACTED:<id>]` is replaced with its value before the tool runs, so a file
+  keeps its real secret when the agent edits around a masked line.
+- An edit input holding a placeholder with an unknown id (for example after a
+  restart) or the bare `[REDACTED]` is rejected, unless the target file already
+  contains that exact text. The error tells the agent to re-read the lines it
+  wants to change.
+- A `shell` input containing a `[REDACTED:<id>]` placeholder is rejected and
+  never substituted, so placeholders cannot send secrets elsewhere. The bare
+  `[REDACTED]` stays usable in commands such as `grep`.
+
 ## Limits
 
 - Environment and dotfile values shorter than 12 characters are not masked.
@@ -47,6 +70,9 @@ and replaces matches with a `[REDACTED:<id>]` placeholder:
   references keep their text instead of showing a placeholder.
 - URL passwords are masked at 8 characters or more; the scheme, user, host and
   path stay readable.
+- The id map lives only in memory: after a restart every placeholder becomes
+  unresolvable, and the real value is never written to a result, an error or a
+  log — only the placeholder text itself is.
 - Secrets in any other shape (for example a bare token with no key and no
   matching dotfile or environment value) pass through unchanged.
 
@@ -63,7 +89,9 @@ Add the plugin to `opencode.jsonc`:
 ## Development
 
 ```sh
-bun install && bun run typecheck
+bun install
+bun run typecheck
+bun test
 ```
 
 ## License
