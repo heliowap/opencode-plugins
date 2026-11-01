@@ -14,6 +14,7 @@ import {
   SOL,
   SONNET,
   stopRuns,
+  text,
   toolParts,
   toolResults,
   type Call,
@@ -170,6 +171,52 @@ describe("other dispatch modes", () => {
 
       expect(childRoutes(host.fixture.agentCalls())).toEqual([`${SONNET}#medium`, `${SONNET}#medium`])
       expect(await host.children(session)).toHaveLength(1)
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "continuing a background subagent by sessionID with an Anthropic API model is rejected",
+    async () => {
+      const { host } = await run({
+        catalog: { anthropic: { "claude-sonnet-5-5": "claude" } },
+        script: (call) => {
+          if (call.request.messages.some((message) => text(message).includes("You are a subagent spawned")))
+            return { text: "child answer" }
+          const results = toolResults(call.request)
+          if (results.length === 0)
+            return {
+              tool: "subagent",
+              args: { agent: "general", description: "bg look", prompt: "find it", background: true },
+            }
+          if (results.length === 1) {
+            const sessionID = results[0]!.match(/sessionID: (ses_[A-Za-z0-9]+)/)![1]
+            return {
+              tool: "subagent",
+              args: {
+                agent: "general",
+                description: "bg more",
+                prompt: "dig deeper",
+                sessionID,
+                model: "anthropic/claude-sonnet-5-5",
+              },
+            }
+          }
+          return { text: "parent done" }
+        },
+      })
+
+      const isChild = (call: Call) =>
+        call.request.messages.some((message) => text(message).includes("You are a subagent spawned"))
+      const lastResult = host.fixture.calls
+        .filter((call) => call.provider === "fixture" && !isChild(call))
+        .flatMap((call) => toolResults(call.request))
+        .at(-1)
+
+      expect(lastResult).toContain("anthropic/claude-sonnet-5-5 is user-only")
+      expect(host.fixture.agentCalls("anthropic")).toEqual([])
+      // Only the first dispatch reached the child; the rejected continue never did.
+      expect(host.fixture.agentCalls().filter(isChild)).toHaveLength(1)
     },
     TIMEOUT,
   )
