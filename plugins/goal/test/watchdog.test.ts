@@ -20,28 +20,64 @@ test("a child starts idle, then stalls exactly at the threshold once", () => {
   const empty: Children = new Map()
   const created = watch(empty, { _tag: "Created", sessionID: "child", parentID: "parent" }, 10, 1500)
   expect(created).toEqual({
-    children: new Map([["child", { parentID: "parent", running: false, lastActivity: 10, openCalls: new Set(), ended: false }]]), stalls: [],
+    children: new Map([["child", { parentID: "parent", running: false, lastActivity: 10, openCalls: new Set(), ended: false }]]), stalls: [], expired: [],
   })
   expect(empty).toEqual(new Map())
   expect(watch(created.children, { _tag: "Tick" }, 10_000, 1500).stalls).toEqual([])
   const started = watch(created.children, { _tag: "Started", sessionID: "child" }, 100, 1500)
   expect(started).toEqual({
-    children: new Map([["child", { parentID: "parent", running: true, lastActivity: 100, openCalls: new Set(), ended: false }]]), stalls: [],
+    children: new Map([["child", { parentID: "parent", running: true, lastActivity: 100, openCalls: new Set(), ended: false }]]), stalls: [], expired: [],
   })
   expect(watch(started.children, { _tag: "Tick" }, 1599, 1500).stalls).toEqual([])
   const stalled = watch(started.children, { _tag: "Tick" }, 1600, 1500)
   expect(stalled).toEqual({
     children: new Map([["child", { parentID: "parent", running: false, lastActivity: 100, openCalls: new Set(), ended: false }]]),
     stalls: [{ sessionID: "child", parentID: "parent", idleMs: 1500 }],
+    expired: [],
   })
   expect(watch(stalled.children, { _tag: "Tick" }, 2000, 1500).stalls).toEqual([])
   expect(started.children).toEqual(new Map([["child", { parentID: "parent", running: true, lastActivity: 100, openCalls: new Set(), ended: false }]]))
 })
 
+test("a child that never ran expires after the stall window", () => {
+  const created = watch(new Map(), { _tag: "Created", sessionID: "child", parentID: "parent" }, 10, 1500)
+  const before = watch(created.children, { _tag: "Tick" }, 1509, 1500)
+  expect(before).toEqual({
+    children: new Map([["child", { parentID: "parent", running: false, lastActivity: 10, openCalls: new Set(), ended: false }]]),
+    stalls: [],
+    expired: [],
+  })
+  const tick = watch(created.children, { _tag: "Tick" }, 1510, 1500)
+  expect(tick).toEqual({
+    children: new Map([["child", { parentID: "parent", running: false, lastActivity: 10, openCalls: new Set(), ended: true }]]),
+    stalls: [],
+    expired: [{ sessionID: "child", parentID: "parent" }],
+  })
+})
+
+test("a stalled child that stays silent expires on a later tick", () => {
+  const children: Children = new Map([["child", { parentID: "parent", running: true, lastActivity: 0, openCalls: new Set(), ended: false }]])
+  const stalled = watch(children, { _tag: "Tick" }, 1500, 1500)
+  expect(stalled.stalls).toEqual([{ sessionID: "child", parentID: "parent", idleMs: 1500 }])
+  expect(stalled.expired).toEqual([])
+  expect(watch(stalled.children, { _tag: "Tick" }, 1501, 1500)).toEqual({
+    children: new Map([["child", { parentID: "parent", running: false, lastActivity: 0, openCalls: new Set(), ended: true }]]),
+    stalls: [],
+    expired: [{ sessionID: "child", parentID: "parent" }],
+  })
+})
+
+test("an ended child is not expired again, and an open call keeps a silent child counted", () => {
+  const ended: Children = new Map([["child", { parentID: "parent", running: false, lastActivity: 0, openCalls: new Set(), ended: true }]])
+  expect(watch(ended, { _tag: "Tick" }, 10_000, 1500)).toEqual({ children: ended, stalls: [], expired: [] })
+  const open: Children = new Map([["child", { parentID: "parent", running: false, lastActivity: 0, openCalls: new Set(["call"]), ended: false }]])
+  expect(watch(open, { _tag: "Tick" }, 10_000, 1500).expired).toEqual([])
+})
+
 test("activity refreshes the clock without changing calls or running status", () => {
   const children: Children = new Map([["child", { parentID: "parent", running: true, lastActivity: 10, openCalls: new Set(["call"]), ended: false }]])
   expect(watch(children, { _tag: "Activity", sessionID: "child" }, 100, 1500)).toEqual({
-    children: new Map([["child", { parentID: "parent", running: true, lastActivity: 100, openCalls: new Set(["call"]), ended: false }]]), stalls: [],
+    children: new Map([["child", { parentID: "parent", running: true, lastActivity: 100, openCalls: new Set(["call"]), ended: false }]]), stalls: [], expired: [],
   })
   expect(children).toEqual(new Map([["child", { parentID: "parent", running: true, lastActivity: 10, openCalls: new Set(["call"]), ended: false }]]))
 })
@@ -50,17 +86,17 @@ test("all open tools must settle before a silent running child can stall", () =>
   const children: Children = new Map([["child", { parentID: "parent", running: true, lastActivity: 0, openCalls: new Set(["first"]), ended: false }]])
   const called = watch(children, { _tag: "ToolCalled", sessionID: "child", callID: "second" }, 100, 1500)
   expect(called).toEqual({
-    children: new Map([["child", { parentID: "parent", running: true, lastActivity: 100, openCalls: new Set(["first", "second"]), ended: false }]]), stalls: [],
+    children: new Map([["child", { parentID: "parent", running: true, lastActivity: 100, openCalls: new Set(["first", "second"]), ended: false }]]), stalls: [], expired: [],
   })
   expect(watch(called.children, { _tag: "Tick" }, 10_000, 1500).stalls).toEqual([])
   const firstSettled = watch(called.children, { _tag: "ToolSettled", sessionID: "child", callID: "first" }, 10_000, 1500)
   expect(firstSettled).toEqual({
-    children: new Map([["child", { parentID: "parent", running: true, lastActivity: 10_000, openCalls: new Set(["second"]), ended: false }]]), stalls: [],
+    children: new Map([["child", { parentID: "parent", running: true, lastActivity: 10_000, openCalls: new Set(["second"]), ended: false }]]), stalls: [], expired: [],
   })
   expect(watch(firstSettled.children, { _tag: "Tick" }, 20_000, 1500).stalls).toEqual([])
   const settled = watch(firstSettled.children, { _tag: "ToolSettled", sessionID: "child", callID: "second" }, 20_000, 1500)
   expect(settled).toEqual({
-    children: new Map([["child", { parentID: "parent", running: true, lastActivity: 20_000, openCalls: new Set(), ended: false }]]), stalls: [],
+    children: new Map([["child", { parentID: "parent", running: true, lastActivity: 20_000, openCalls: new Set(), ended: false }]]), stalls: [], expired: [],
   })
   expect(watch(settled.children, { _tag: "Tick" }, 21_499, 1500).stalls).toEqual([])
   expect(watch(settled.children, { _tag: "Tick" }, 21_501, 1500).stalls).toEqual([{ sessionID: "child", parentID: "parent", idleMs: 1501 }])
@@ -77,16 +113,16 @@ test("ending clears calls, restarting refreshes activity, and deleting untracks 
   expect(ended).toEqual({ children: new Map([
     ["child", { parentID: "parent", running: false, lastActivity: 10, openCalls: new Set(), ended: true }],
     ["other", { parentID: "another", running: true, lastActivity: 50, openCalls: new Set(), ended: false }],
-  ]), stalls: [] })
+  ]), stalls: [], expired: [] })
   expect(watch(ended.children, { _tag: "Started", sessionID: "child" }, 150, 1500).children.get("child")).toEqual(
     { parentID: "parent", running: true, lastActivity: 150, openCalls: new Set(), ended: false },
   )
   expect(watch(children, { _tag: "Started", sessionID: "child" }, 200, 1500)).toEqual({ children: new Map([
     ["child", { parentID: "parent", running: true, lastActivity: 200, openCalls: new Set(), ended: false }],
     ["other", { parentID: "another", running: true, lastActivity: 50, openCalls: new Set(), ended: false }],
-  ]), stalls: [] })
+  ]), stalls: [], expired: [] })
   expect(watch(children, { _tag: "Deleted", sessionID: "child" }, 300, 1500)).toEqual({
-    children: new Map([["other", { parentID: "another", running: true, lastActivity: 50, openCalls: new Set(), ended: false }]]), stalls: [],
+    children: new Map([["other", { parentID: "another", running: true, lastActivity: 50, openCalls: new Set(), ended: false }]]), stalls: [], expired: [],
   })
 })
 
@@ -102,7 +138,7 @@ test("events for an untracked session preserve the same map", () => {
     { _tag: "Ended", sessionID: "missing" }, { _tag: "Deleted", sessionID: "missing" },
   ] as const) {
     const result = watch(children, event, 100, 1500)
-    expect(result).toEqual({ children: new Map([["other", { parentID: "parent", running: false, lastActivity: 10, openCalls: new Set(), ended: false }]]), stalls: [] })
+    expect(result).toEqual({ children: new Map([["other", { parentID: "parent", running: false, lastActivity: 10, openCalls: new Set(), ended: false }]]), stalls: [], expired: [] })
     expect(result.children).toBe(children)
   }
 })

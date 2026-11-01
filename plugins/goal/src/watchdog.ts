@@ -13,7 +13,8 @@ export interface Child {
   readonly parentID: string
   readonly running: boolean
   // A created-but-never-ended child is live even before it starts and after a stall, so the parent
-  // stays quiet until an end or delete event. `ended` clears only when the child starts again.
+  // stays quiet until an end or delete event — or until a full stall window passes without a run.
+  // `ended` clears only when the child starts again.
   readonly ended: boolean
   readonly lastActivity: number
   readonly openCalls: ReadonlySet<string>
@@ -37,11 +38,17 @@ export interface Stall {
   readonly idleMs: number
 }
 
+export interface Expired {
+  readonly sessionID: string
+  readonly parentID: string
+}
+
 export const watch = (children: Children, event: WatchEvent, now: number, stallMs: number): {
   readonly children: Children
   readonly stalls: readonly Stall[]
+  readonly expired: readonly Expired[]
 } => {
-  const untouched = { children, stalls: [] as Stall[] }
+  const untouched = { children, stalls: [] as Stall[], expired: [] as Expired[] }
   const update = (sessionID: string, change: (child: Child) => Child | undefined) => {
     const child = children.get(sessionID)
     if (!child) return untouched
@@ -49,25 +56,32 @@ export const watch = (children: Children, event: WatchEvent, now: number, stallM
     const changed = change(child)
     if (changed) next.set(sessionID, changed)
     else next.delete(sessionID)
-    return { children: next, stalls: [] as Stall[] }
+    return { children: next, stalls: [] as Stall[], expired: [] as Expired[] }
   }
   switch (event._tag) {
     case "Tick": {
       const next = new Map(children)
       const stalls: Stall[] = []
+      const expired: Expired[] = []
       for (const [sessionID, child] of children) {
         const idleMs = now - child.lastActivity
-        if (child.running && child.openCalls.size === 0 && idleMs >= stallMs) {
+        if (child.openCalls.size !== 0 || idleMs < stallMs) continue
+        if (child.running) {
           stalls.push({ sessionID, parentID: child.parentID, idleMs })
           next.set(sessionID, { ...child, running: false })
+        } else if (!child.ended) {
+          // A child that never ran, or one stalled behind a failed interrupt, may never report an
+          // end — expire it so the parent stops waiting on it.
+          expired.push({ sessionID, parentID: child.parentID })
+          next.set(sessionID, { ...child, ended: true })
         }
       }
-      return { children: next, stalls }
+      return { children: next, stalls, expired }
     }
     case "Created": {
       const next = new Map(children)
       next.set(event.sessionID, { parentID: event.parentID, running: false, ended: false, lastActivity: now, openCalls: new Set() })
-      return { children: next, stalls: [] }
+      return { children: next, stalls: [], expired: [] }
     }
     case "Started":
       return update(event.sessionID, (child) => ({ ...child, running: true, ended: false, lastActivity: now, openCalls: new Set() }))
