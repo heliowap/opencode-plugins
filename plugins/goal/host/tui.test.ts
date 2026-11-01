@@ -57,11 +57,33 @@ const shows = (expected: string | RegExp) =>
     `the line above the input never showed ${typeof expected === "string" ? `"${expected}"` : expected}.`,
   )
 
-const click = (pattern: RegExp) => {
+const click = async (pattern: RegExp) => {
+  // Click targets can still move while the layout is drawing, and a dismissed
+  // dialog keeps intercepting clicks for a rendered frame, so wait until the
+  // match holds the same row across captures before clicking its coordinates.
+  let row: number | undefined
+  let lastSampledAt = 0
+  let stableSamples = 0
+  await waitFor(
+    () => {
+      const now = Date.now()
+      if (now - lastSampledAt < 500) return false
+      lastSampledAt = now
+      const next = screen().split("\n").findIndex((line) => pattern.test(line))
+      if (next < 0) {
+        row = undefined
+        stableSamples = 0
+        return false
+      }
+      stableSamples = next === row ? stableSamples + 1 : 1
+      row = next
+      return stableSamples === 3
+    },
+    `the line matching ${pattern} never stayed on one row across three captures.`,
+  )
   const lines = screen().split("\n")
-  const row = lines.findIndex((line) => pattern.test(line))
-  expect(row).toBeGreaterThanOrEqual(0)
-  const cell = `${lines[row]!.search(pattern) + 1};${row + 1}`
+  expect(lines.findIndex((line) => pattern.test(line))).toBe(row!)
+  const cell = `${lines[row!]!.search(pattern) + 1};${row! + 1}`
   type("-l", `\x1b[<0;${cell}M\x1b[<0;${cell}m`)
 }
 
@@ -225,30 +247,8 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       await host.settle(session)
       open(session)
 
-      // The title moves while the layout is still drawing.
-      const title = /\bGoal\s*$/m
-      let lastSampledAt = 0
-      let titleRow: number | undefined
-      let stableSamples = 0
-      await waitFor(
-        () => {
-          const now = Date.now()
-          if (now - lastSampledAt < 500) return false
-          lastSampledAt = now
-          const row = screen().split("\n").findIndex((line) => title.test(line))
-          if (row < 0) {
-            titleRow = undefined
-            stableSamples = 0
-            return false
-          }
-          stableSamples = row === titleRow ? stableSamples + 1 : 1
-          titleRow = row
-          return stableSamples === 3
-        },
-        "the sidebar title never stayed on one row across three captures.",
-      )
       expect(screen()).not.toContain("Edit goal")
-      click(title)
+      await click(/\bGoal\s*$/m)
       await sees(["Edit goal", "open me from the sidebar"])
     },
     TIMEOUT,
@@ -266,7 +266,7 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       open(session)
 
       await shows(running("120"))
-      click(/goal (running|active)/)
+      await click(/goal (running|active)/)
       await sees(["Token budget", "Pause goal", "Clear goal"])
       type("-l", "Token budget")
       type("Enter")
@@ -275,7 +275,13 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       type("Enter")
       await host.until(() => host!.stored(session)?.tokenBudget === 5_000)
 
-      click(/goal (running|active)/)
+      // The budget prompt's backdrop still owns the click for a rendered frame
+      // after it dismisses; wait until it is visibly gone before clicking again.
+      await waitFor(
+        () => !screen().includes("Such as 50K or 1.5M") && !screen().includes("Pause goal"),
+        "the token budget prompt never left the screen.",
+      )
+      await click(/goal (running|active)/)
       await sees(["Pause goal"])
       type("-l", "Pause goal")
       type("Enter")
