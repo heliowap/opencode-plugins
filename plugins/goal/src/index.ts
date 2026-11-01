@@ -22,7 +22,7 @@ import {
 } from "./prompts.ts"
 import { appendCapped, LOG_LIMIT, logPath } from "./log.ts"
 import { GoalRpc } from "./rpc.ts"
-import { forget, loopStep, MUTATING_TOOLS, shellCommand, withWarning, type Streaks } from "./loop.ts"
+import { forget, loopStep, PROGRESS_TOOLS, shellCommand, withWarning, type Streaks } from "./loop.ts"
 import { commandRecord, errorRecord, logEnabled, sessionOf, toolErrorRecord, transitionRecord, type GoalTool, type TraceRecord } from "./trace.ts"
 import { stallDelay, tickInterval, watch, watchEventOf, type Children, type Stall, type WatchEvent } from "./watchdog.ts"
 
@@ -69,6 +69,7 @@ const KEY_PREFIX = "goal/"
 // server keeps the turns already in flight, while a process restart starts clean.
 interface LocationState {
   readonly activity: Set<string>
+  readonly progress: Set<string>
   readonly agents: Map<string, string>
   readonly resumePending: Set<string>
   readonly closingSteps: Map<string, string>
@@ -91,10 +92,12 @@ const locationState = (directory: string) => {
     if (!existing.watchdog) Object.assign(existing, { watchdog: { children: new Map() } })
     if (!existing.loops) Object.assign(existing, { loops: { streaks: new Map() } })
     if (!existing.warned) Object.assign(existing, { warned: { calls: new Map() } })
+    if (!existing.progress) Object.assign(existing, { progress: new Set() })
     return { state: existing, fresh: false }
   }
   const state: LocationState = {
     activity: new Set(),
+    progress: new Set(),
     agents: new Map(),
     resumePending: new Set(),
     closingSteps: new Map(),
@@ -178,9 +181,13 @@ export default Plugin.define({
       const goalOutput = ({ goal }: { readonly goal: Goal | undefined }) => ({ goal: goal ?? null })
 
       const { state, fresh } = locationState(ctx.location.directory)
-      const { activity, agents, resumePending, closingSteps, retries, continuations, watchdog, loops, warned } = state
+      const { activity, progress, agents, resumePending, closingSteps, retries, continuations, watchdog, loops, warned } = state
       const key = (sessionID: string) => `${KEY_PREFIX}${sessionID}`
       const planning = (sessionID: string) => PLANNING_AGENTS.has(agents.get(sessionID) ?? "")
+      // A child is live from its creation event until it ends or is deleted; a stalled child is
+      // still live because the interrupt may not have reached it yet.
+      const liveChildren = (sessionID: string) =>
+        [...watchdog.children.values()].filter((child) => child.parentID === sessionID && !child.ended).length
 
       const load = (sessionID: string) => ctx.storage.get(key(sessionID)).pipe(Effect.map(decodeGoal))
 
@@ -463,7 +470,10 @@ export default Plugin.define({
 
       yield* ctx.tool.hook("execute.after", (event) =>
         Effect.sync(() => {
-          if (event.status === "completed" && MUTATING_TOOLS.has(event.tool)) activity.add(event.sessionID)
+          if (event.status === "completed" && PROGRESS_TOOLS.has(event.tool)) {
+            activity.add(event.sessionID)
+            progress.add(event.sessionID)
+          }
           if (!warned.calls.delete(event.id)) return
           const text = loopWarningText(shellCommand(event.tool, event.input) ?? "")
           if (event.status === "error") {
@@ -487,6 +497,7 @@ export default Plugin.define({
           case "session.execution.started":
             return Effect.sync(() => {
               activity.delete(event.data.sessionID)
+              progress.delete(event.data.sessionID)
               resumePending.delete(event.data.sessionID)
             }).pipe(Effect.andThen(onEvent(event.data.sessionID, { _tag: "TurnStarted" })))
           case "session.text.ended":
@@ -506,6 +517,8 @@ export default Plugin.define({
                 onEvent(event.data.sessionID, {
                   _tag: "TurnEnded",
                   activity: activity.has(event.data.sessionID),
+                  progress: progress.has(event.data.sessionID),
+                  waiting: liveChildren(event.data.sessionID) > 0,
                   planning: planning(event.data.sessionID),
                   delayMs: cooldownMs,
                 }),
@@ -569,10 +582,27 @@ export default Plugin.define({
         Stream.runForEach((event) => {
           const sessionID = sessionOf(event)
           const watchEvent = watchEventOf(event, ctx.location.directory)
+          // The child's parent is read before applyWatch, because Deleted removes its entry.
+          const childParent =
+            sessionID !== undefined && (watchEvent?._tag === "Ended" || watchEvent?._tag === "Deleted")
+              ? watchdog.children.get(sessionID)?.parentID
+              : undefined
           // Each part has its own catchCause, so a watchdog failure cannot drop the goal handler's event.
           return (watchEvent ? applyWatch(watchEvent) : Effect.void).pipe(
             Effect.catchCause(logFailure("watchdog", sessionID)),
             Effect.andThen(handle(event).pipe(Effect.catchCause(logFailure(event.type, sessionID)))),
+            Effect.andThen(
+              // Suspend so the running-children count is read after applyWatch marked the child ended.
+              childParent === undefined
+                ? Effect.void
+                : Effect.suspend(() =>
+                    onEvent(childParent, {
+                      _tag: "ChildEnded",
+                      running: liveChildren(childParent),
+                      delayMs: cooldownMs,
+                    }),
+                  ),
+            ),
           )
         }),
         Effect.catchCause(logFailure("event stream")),
