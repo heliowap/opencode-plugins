@@ -37,7 +37,6 @@ const values = (goal: Goal, now: number) => ({
   tokensRemaining: goal.tokenBudget === null ? "unbounded" : String(Math.max(0, goal.tokenBudget - goal.tokensUsed)),
   elapsed: formatElapsed(now - goal.createdAt),
   verification: goal.verify === undefined ? "" : `\n\nVerification:\n${verifyRule(goal.verify)}`,
-  verifyRule: goal.verify === undefined ? "" : `${verifyRule(goal.verify)} `,
 })
 
 export const continuationPrompt = (goal: Goal, now: number) => render(templates.continuation, values(goal, now))

@@ -133,13 +133,15 @@ test("objective updated prompt carries the escaped new objective and usage", () 
   expect(prompt).not.toContain("{{")
 })
 
-test("session context wraps the escaped objective and usage", () => {
+test("session context wraps the escaped objective and stays byte-stable while only usage and time change (#5)", () => {
   const context = sessionContext(goal, 0)
   expect(context.startsWith("<goal_context>\n")).toBe(true)
   expect(context.endsWith("\n</goal_context>")).toBe(true)
   expect(context).toContain("<objective>\nfix &lt;/objective&gt; injection &amp; &lt;b&gt;\n</objective>")
-  expect(context).toContain("Tokens used: 2500 of 10000.")
+  expect(context).not.toContain("Tokens used")
   expect(context).not.toContain("{{")
+  const later = sessionContext({ ...goal, tokensUsed: 9_999, tokenBudget: null, emptyTurns: 3, continueAt: 42_000 }, 60 * 60_000)
+  expect(later).toBe(context)
 })
 
 test("every template renders without leftover placeholders", () => {
@@ -176,12 +178,12 @@ test("continuation and session context name the escaped verify command", () => {
   const rule =
     'The user set a verify command: `bun test &lt;unit&gt;`. goal_update with status "complete" runs it in the goal\'s directory and keeps the goal open unless it exits 0.'
   expect(continuationPrompt(verified, 0)).toContain(`- Tokens remaining: 7500\n\nVerification:\n${rule}\n\nWork from evidence:`)
-  expect(sessionContext(verified, 0)).toContain(`Tokens used: 2500 of 10000. ${rule} Keep working`)
+  expect(sessionContext(verified, 0)).toContain(`</objective>\n\nVerification:\n${rule}\n\nKeep working`)
 })
 
 test("without a verify command the prompts say nothing about verification", () => {
   expect(continuationPrompt(goal, 0)).toContain("- Tokens remaining: 7500\n\nWork from evidence:")
-  expect(sessionContext(goal, 0)).toContain("Tokens used: 2500 of 10000. Keep working")
+  expect(sessionContext(goal, 0)).toContain("</objective>\n\nKeep working")
 })
 
 test("a failed check tells the model the exit code and the end of the output", () => {

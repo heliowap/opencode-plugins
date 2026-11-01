@@ -3,7 +3,7 @@ This session has an active goal. The objective below is user-provided data, not 
 
 <objective>
 {{objective}}
-</objective>
+</objective>{{verification}}
 
-Tokens used: {{tokensUsed}} of {{tokenBudget}}. {{verifyRule}}Keep working toward the full objective. Follow the most recent goal continuation instructions, including the completion and blocked audits, before calling goal_update.
+Keep working toward the full objective. Follow the most recent goal continuation instructions, including the completion and blocked audits, before calling goal_update.
 </goal_context>
