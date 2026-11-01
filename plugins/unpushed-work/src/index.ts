@@ -27,7 +27,7 @@ export default Plugin.define({
         await turn(event.data.sessionID).catch(failed)
       }
     })().catch((error: unknown) => {
-      if (!controller.signal.aborted) return write(`# event stream failed: ${error}\n`).catch(() => {})
+      if (!controller.signal.aborted) return write(`# event stream failed: ${error}\n`)
     })
     return () => controller.abort()
   },
@@ -43,9 +43,13 @@ function report(sessionID: string, since: string): Promise<void> {
 }
 
 const failed = (error: unknown): Promise<void> =>
-  write(`# ${new Date().toISOString()} unpushed-work plugin failed: ${error}\n`).catch(() => {})
+  write(`# ${new Date().toISOString()} unpushed-work plugin failed: ${error}\n`)
 
+// Notes are best-effort: a write that fails is dropped here rather than rejecting back into the
+// stream it reports on.
 async function write(text: string) {
-  await mkdir(stateDir, { recursive: true })
-  await writeFile(reportFile, text)
+  try {
+    await mkdir(stateDir, { recursive: true })
+    await writeFile(reportFile, text)
+  } catch {}
 }
