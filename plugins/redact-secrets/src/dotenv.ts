@@ -1,6 +1,5 @@
 import { isSecretFieldKey, MIN_SECRET_LENGTH } from "./redact.ts"
 
-// Project dotfiles that hold credentials: .env and .env.*, except .env.example.
 export const isDotenvFile = (name: string): boolean =>
   name === ".env" || (name.startsWith(".env.") && name !== ".env.example")
 
@@ -14,10 +13,9 @@ export const parseDotenv = (text: string): [string, string][] =>
     const match = ENTRY.exec(line)
     const name = match?.[1]
     if (!match || name === undefined) return []
-    const raw = match[2] ?? ""
-    const trimmed = raw.trim()
-    const quoted = QUOTED.exec(trimmed)
-    const value = quoted?.[2] ?? trimmed.replace(/\s+#.*$/, "").trimEnd()
+    const trimmed = (match[2] ?? "").trim()
+    const uncommented = trimmed.replace(/\s+#.*$/, "").trimEnd()
+    const value = QUOTED.exec(trimmed)?.[2] ?? QUOTED.exec(uncommented)?.[2] ?? uncommented
     return [[name, value] as [string, string]]
   })
 
