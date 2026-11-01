@@ -121,6 +121,13 @@ test("a command-executing wrapper resolves the command it runs", () => {
   expect(flagsShellCommand("setsid cat AGENTS.md")).toBe(false)
 })
 
+test("eval arguments join into a command that is analyzed again", () => {
+  expect(flagsShellCommand("eval rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("eval 'rm' 'AGENTS.md'")).toBe(true)
+  expect(flagsShellCommand("echo x | xargs -I{} eval rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("eval cat AGENTS.md")).toBe(false)
+})
+
 test("a VAR=value word after the command is an argument, not an assignment", () => {
   expect(flagsShellCommand("echo F=AGENTS.md; rm $F")).toBe(false)
   expect(flagsShellCommand("F=AGENTS.md; rm $F")).toBe(true)

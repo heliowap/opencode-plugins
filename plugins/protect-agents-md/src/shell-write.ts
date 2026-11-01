@@ -592,14 +592,18 @@ const unwrap = (argv: readonly string[]): { cmd: string; args: readonly string[]
   }
 }
 
-const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: string) => boolean): boolean => {
-  if (simple.redirects.some((redirect) => redirect.write && NAMES.test(redirect.target))) return true
-  const { cmd, args, cmdString } = unwrap(simple.argv)
+// Judges the command an argv runs: after unwrapping, argv[0] is the executed program. When
+// "stdinNames" is set the command's input names AGENTS.md (an earlier pipeline stage produced
+// it), so consumers like xargs turn that name into operands of the command they run.
+const flagsExec = (argv: readonly string[], stdinNames: boolean, run: (inner: string) => boolean): boolean => {
+  const { cmd, args, cmdString } = unwrap(argv)
   // An option like flock's "-c" carries a command string: it is analyzed as a command.
   if (cmdString !== undefined && run(cmdString)) return true
   // The remote command of ssh runs on another machine; only its local redirects count.
   if (cmd === "ssh") return false
   const names = (word: string) => NAMES.test(word)
+  // eval joins its arguments into one command line and runs it.
+  if (cmd === "eval" && args.length > 0 && run(args.join(" "))) return true
   // A shell's "-c" argument carries a nested command, alone or inside a single-dash
   // option cluster such as "-lc" or "-ec".
   if (SHELL_CMDS.has(cmd)) {
@@ -609,13 +613,28 @@ const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: str
   }
   if (WRITER_NAMES.has(cmd) && args.some(names)) return true
   if (cmd === "xargs") {
-    // xargs gets its arguments from the pipe: "… AGENTS.md | xargs rm" removes them.
     let j = 0
-    while (j < args.length && args[j]!.startsWith("-")) j += XARGS_OPTS.has(args[j]!) ? 2 : 1
-    if (WRITER_NAMES.has(basenameOf(args[j] ?? ""))) {
-      const earlier = stages.slice(0, stages.indexOf(simple)).filter((stage) => stage.pipeline === simple.pipeline)
-      if (args.some(names) || earlier.some((stage) => stage.argv.some(names))) return true
+    let repl: string | undefined
+    while (j < args.length && args[j]!.startsWith("-")) {
+      if (args[j] === "-I") {
+        repl = args[j + 1]
+        j += 2
+        continue
+      }
+      if (args[j]!.startsWith("-I") && args[j]!.length > 2) {
+        repl = args[j]!.slice(2)
+        j += 1
+        continue
+      }
+      j += XARGS_OPTS.has(args[j]!) ? 2 : 1
     }
+    const rest = args.slice(j)
+    // The command xargs runs is judged on its own argv. Input lines name the file only when
+    // an earlier pipeline stage does: they are appended as operands (a writer consumes them)
+    // or substituted for -I's replace string wherever it appears in the executed argv.
+    if (rest.length > 0 && flagsExec(rest, false, run)) return true
+    if (stdinNames && repl !== undefined && flagsExec(rest.map((arg) => arg.replaceAll(repl, "AGENTS.md")), false, run)) return true
+    if (stdinNames && repl === undefined && WRITER_NAMES.has(basenameOf(rest[0] ?? ""))) return true
   }
   if (IN_PLACE_CMDS.has(cmd) && args.some((arg) => IN_PLACE_FLAG.test(arg)) && args.some(names)) return true
   if ((cmd === "sed" || cmd === "gsed") && args.some((arg) => /(?:^|[\s;'"/0-9p])w\s+\S*agents\.md(?:$|[^\w.])/i.test(arg))) return true
@@ -631,7 +650,17 @@ const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: str
     )
   )
     return true
-  if (simple.argv.some((word) => scriptFlags(word, run))) return true
+  return argv.some((word) => scriptFlags(word, run))
+}
+
+const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: string) => boolean): boolean => {
+  if (simple.redirects.some((redirect) => redirect.write && NAMES.test(redirect.target))) return true
+  const names = (word: string) => NAMES.test(word)
+  const stdinNames = stages
+    .slice(0, stages.indexOf(simple))
+    .filter((stage) => stage.pipeline === simple.pipeline)
+    .some((stage) => stage.argv.some(names))
+  if (flagsExec(simple.argv, stdinNames, run)) return true
   return simple.heredocs.some((body) => run(body))
 }
 
