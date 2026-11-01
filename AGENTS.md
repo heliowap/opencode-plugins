@@ -7,3 +7,17 @@ Monorepo of OpenCode v2 plugins. Bun, TypeScript.
 - `bun run check` must pass before every commit; the pre-commit hook runs it. `bun run check:all` runs everything at once.
 - Before adding a plugin, running a host suite, or proving an install, read `docs/development.md`.
 - Plugin ids differ from directory names (`tps.meter.server`, `local.unpushed-work`); never derive one from the other.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on this repository; use `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical role names as label strings. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
