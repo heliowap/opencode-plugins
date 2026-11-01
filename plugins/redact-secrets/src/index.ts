@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto"
 import { readdirSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { dotenvSecrets, isDotenvFile } from "./dotenv.ts"
-import { createMasker, isEnvSecretName, isPlainObject, MIN_SECRET_LENGTH } from "./redact.ts"
+import { createMasker, isEnvSecretName, MIN_SECRET_LENGTH } from "./redact.ts"
 import { EDIT_TOOLS, findPlaceholder, restoreInput, SHELL_TOOLS, shellRejection, targetPaths } from "./restore.ts"
 
 // Values from .env and .env.* in the session directory are known secrets too.
@@ -60,7 +60,7 @@ export default Plugin.define({
 
     await ctx.tool.hook("execute.after", (event) => {
       if (event.status === "completed") event.result = masker.redact(event.result) as typeof event.result
-      else if (isPlainObject(event.error)) event.error = masker.redact(event.error) as typeof event.error
+      else event.error = masker.redact(event.error) as typeof event.error
     })
   },
 })
