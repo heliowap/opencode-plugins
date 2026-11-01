@@ -6,7 +6,7 @@ import { homedir } from "node:os"
 import { parseCommand, type GoalCommand } from "./command.ts"
 import { formatTokens } from "./format.ts"
 import {
-  continuationDelay, decodeGoal, isUnfinished, retryDelays, step,
+  continuationDelay, decodeGoal, isUnfinished, pauseOnRestart, retryDelays, step,
   type Check, type Goal, type GoalEffect, type GoalEvent,
 } from "./goal.ts"
 import {
@@ -149,6 +149,7 @@ export default Plugin.define({
       const now = () => Date.now()
       const delays = retryDelays(ctx.options.retryDelaysMs)
       const cooldownMs = continuationDelay(ctx.options.continuationDelayMs)
+      const pauseRecovered = pauseOnRestart(ctx.options.pauseOnRestart)
       const tracing = logEnabled(ctx.options, process.env)
       const traceFile = logPath(process.env, homedir())
 
@@ -551,7 +552,9 @@ export default Plugin.define({
 
       // A reload closes the previous scope and its pending retry and continuation waits.
       const startup = fresh
-        ? forActiveGoals((sessionID) => transition(sessionID, { _tag: "Recovered" }, { quiet: true }))
+        ? forActiveGoals((sessionID) =>
+            transition(sessionID, { _tag: "Recovered", pauseOnRestart: pauseRecovered, delayMs: cooldownMs }),
+          )
         : Effect.all(
             [
               Effect.forEach([...retries], ([sessionID, { attempt, at }]) => scheduleRetry(sessionID, attempt, at), { discard: true }),

@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { afterToolResult, CONTINUATION, count } from "./harness/fixture.ts"
 import { Host } from "./harness/host.ts"
 
@@ -31,9 +33,39 @@ describe("persistence", () => {
   )
 
   test(
-    "A12b an active goal whose server died mid-turn comes back paused, and resume continues it",
+    "A12b an active goal whose server died mid-turn stays active and continues by itself (#9)",
     async () => {
       host = await Host.start({
+        script: (request) => {
+          if (afterToolResult(request)) return { text: "Closing." }
+          return count(request, CONTINUATION) >= 2 ? complete : { text: "Long step.", delayMs: 20_000 }
+        },
+      })
+      const session = await host.session()
+      await host.goal(session, "outlive a crash")
+      await host.until(() => host!.fixture.agentRequests().length === 1)
+      await host.restart()
+      await host.until(() => host!.stored(session)?.status === "complete")
+      await host.settle(session)
+
+      expect(host.stored(session)).toMatchObject({ status: "complete", note: "done" })
+      const recovered = readFileSync(join(host.root, "data", "opencode", "log", "goal.jsonl"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .filter((record) => record.event === "Recovered")
+      expect(recovered.map(({ at: _at, tokensUsed: _tokens, ...rest }) => rest)).toEqual([
+        { _tag: "Transition", sessionID: session.id, event: "Recovered", from: "active", to: "active", effect: "Cooldown" },
+      ])
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "A12e an active goal comes back paused when pauseOnRestart is set (#9)",
+    async () => {
+      host = await Host.start({
+        pluginOptions: { pauseOnRestart: true },
         script: (request) => {
           if (afterToolResult(request)) return { text: "Closing." }
           return count(request, CONTINUATION) >= 2 ? complete : { text: "Long step.", delayMs: 20_000 }

@@ -37,6 +37,8 @@ export const retryDelays = (option: unknown): readonly number[] =>
 export const continuationDelay = (option: unknown): number =>
   typeof option === "number" && option >= 0 && option < Infinity ? option : 120_000
 
+export const pauseOnRestart = (option: unknown): boolean => option === true
+
 // OpenCode reports HTTP statuses up to 599.
 const serverError = (status: number | undefined) => (status ?? 0) >= 500
 
@@ -73,7 +75,7 @@ export type GoalEvent =
   | { readonly _tag: "Interrupted"; readonly reason: "user" | "shutdown" | "superseded" | "inactivity" }
   | { readonly _tag: "Failed"; readonly message: string; readonly status?: number }
   | { readonly _tag: "RetryDue"; readonly attempt: number }
-  | { readonly _tag: "Recovered" }
+  | { readonly _tag: "Recovered"; readonly pauseOnRestart: boolean; readonly delayMs?: number }
 
 export interface Check {
   readonly command: string
@@ -237,10 +239,14 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
       return goal.status === "active" && event.reason === "user"
         ? update({ status: "paused", note: "Interrupted by the user." })
         : unchanged
-    case "Recovered":
-      return goal.status === "active"
-        ? update({ status: "paused", note: "Recovered after a restart. Run /goal resume to continue." })
-        : unchanged
+    case "Recovered": {
+      if (goal.status !== "active") return unchanged
+      if (event.pauseOnRestart) {
+        return update({ status: "paused", note: "Recovered after a restart. Run /goal resume to continue." })
+      }
+      const at = now + continuationDelay(event.delayMs)
+      return update({ continueAt: at }, { _tag: "Cooldown", at })
+    }
     case "Failed": {
       if (goal.status !== "active") return unchanged
       const failed = goal.failedTurns ?? 0
