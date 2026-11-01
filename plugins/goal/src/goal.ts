@@ -119,6 +119,24 @@ export const continueRefusal = (goal: Goal): string | undefined => {
 
 const NO_GOAL = "No goal is set for this session."
 
+// A refused transition tells the model the one action that unblocks it, so it does not retry the same call.
+export const updateRefusal = (status: Status | "cleared", target: Status): string => {
+  const prefix = `The goal is ${status} and cannot move to ${target}.`
+  switch (status) {
+    case "blocked":
+    case "paused":
+      return `${prefix} Only the user can resume it with /goal resume; report the evidence to the user instead of calling goal_update again.`
+    case "budget_limited":
+      return `${prefix} Only the user can raise the token budget; report the budget state to the user instead of calling goal_update again.`
+    case "complete":
+      return `${prefix} Create a new goal with goal_create or ask the user for one instead of calling goal_update again.`
+    case "active":
+      return `${prefix} Keep working toward the objective and call goal_update again once the completion or blocked audit passes.`
+    case "cleared":
+      return `${prefix} Create a new goal with goal_create or ask the user to set one with /goal <objective>.`
+  }
+}
+
 export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Step => {
   const unchanged: Step = { goal, effect: none }
   // The goal.changed RPC event rejects undefined values, so a cleared field is removed.

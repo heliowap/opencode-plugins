@@ -12,6 +12,9 @@ afterEach(async () => {
 
 const complete = { tool: "goal_update", args: { status: "complete", note: "done" } } as const
 
+// Tool errors reach the model as a JSON envelope; its message is what the model reads.
+const toolError = (result: string) => (JSON.parse(result) as { error: { message: string } }).error.message
+
 describe("user controls", () => {
   test("R1 apply Pause pauses an active goal", async () => {
     host = await Host.start({ script: () => ({ text: "working", delayMs: 3_000 }) })
@@ -142,8 +145,66 @@ describe("user controls", () => {
       const results = toolResults(host.fixture.agentRequests().at(-1)!)
       expect(results[0]).toContain("This session already has an unfinished goal (active).")
       expect(results[1]).toBe("Goal blocked.")
-      expect(results[2]).toContain("The goal is blocked and cannot move to paused.")
+      expect(toolError(results[2]!)).toBe(
+        "The goal is blocked and cannot move to paused. Only the user can resume it with /goal resume; report the evidence to the user instead of calling goal_update again.",
+      )
       expect(host.stored(session)).toMatchObject({ objective: "first goal", status: "blocked", note: "needs a key" })
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "A19 every refused goal_update names the next action (#9)",
+    async () => {
+      host = await Host.start({
+        script: (request) => {
+          const results = toolResults(request).length
+          if (mentions(request, "BLOCKED-CASE")) {
+            if (results === 0) return { tool: "goal_update", args: { status: "blocked", note: "still stuck" } }
+            if (results === 1) return { tool: "goal_update", args: { status: "complete", note: "done" } }
+            return { text: "Done." }
+          }
+          if (mentions(request, "try to complete") || mentions(request, "no goal here")) {
+            if (results === 0) return { tool: "goal_update", args: { status: "complete", note: "done" } }
+            if (results === 1) return { tool: "goal_update", args: { status: "blocked", note: "still stuck" } }
+            return { text: "Done." }
+          }
+          return { text: "Working." }
+        },
+      })
+
+      const blocked = await host.session()
+      await host.goal(blocked, "BLOCKED-CASE")
+      await host.settle(blocked)
+
+      const paused = await host.session()
+      await host.goal(paused, "PAUSED-CASE")
+      await host.goal(paused, "pause")
+      await host.settle(paused)
+      await host.prompt(paused, "try to complete")
+      await host.settle(paused)
+
+      const idle = await host.session()
+      await host.prompt(idle, "no goal here")
+      await host.settle(idle)
+
+      const blockedResults = toolResults(host.fixture.agentRequests().filter((request) => mentions(request, "BLOCKED-CASE")).at(-1)!)
+      expect(blockedResults[0]).toBe("Goal blocked.")
+      expect(toolError(blockedResults[1]!)).toBe(
+        "The goal is blocked and cannot move to complete. Only the user can resume it with /goal resume; report the evidence to the user instead of calling goal_update again.",
+      )
+
+      const pausedResults = toolResults(host.fixture.agentRequests().filter((request) => mentions(request, "try to complete")).at(-1)!)
+      expect(pausedResults.map(toolError)).toEqual([
+        "The goal is paused and cannot move to complete. Only the user can resume it with /goal resume; report the evidence to the user instead of calling goal_update again.",
+        "The goal is paused and cannot move to blocked. Only the user can resume it with /goal resume; report the evidence to the user instead of calling goal_update again.",
+      ])
+
+      const idleResults = toolResults(host.fixture.agentRequests().filter((request) => mentions(request, "no goal here")).at(-1)!)
+      expect(idleResults.map(toolError)).toEqual([
+        "No goal is set for this session. Create one with goal_create, or ask the user to set it with /goal <objective>.",
+        "No goal is set for this session. Create one with goal_create, or ask the user to set it with /goal <objective>.",
+      ])
     },
     TIMEOUT,
   )
