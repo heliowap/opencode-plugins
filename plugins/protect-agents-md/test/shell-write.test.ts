@@ -97,6 +97,11 @@ test("a clustered shell option containing c takes the next argument as a command
   expect(flagsShellCommand("bash -lc 'cat AGENTS.md'")).toBe(false)
 })
 
+test("a command substitution inside arithmetic is still analyzed", () => {
+  expect(flagsShellCommand("$(( $(rm AGENTS.md) + 1 ))")).toBe(true)
+  expect(flagsShellCommand("$(( $(cat AGENTS.md) + 1 ))")).toBe(false)
+})
+
 test("a VAR=value word after the command is an argument, not an assignment", () => {
   expect(flagsShellCommand("echo F=AGENTS.md; rm $F")).toBe(false)
   expect(flagsShellCommand("F=AGENTS.md; rm $F")).toBe(true)

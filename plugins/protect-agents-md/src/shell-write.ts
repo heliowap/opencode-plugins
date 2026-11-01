@@ -155,6 +155,34 @@ const captureParens = (text: string, i: number): [inner: string, next: number] =
   throw new Error("unterminated substitution")
 }
 
+// An arithmetic expansion is not run as commands, but a "$(…)" inside it is a real command
+// substitution and must still be reported. Scans the arithmetic text for substitutions while
+// honoring quotes so a "$(" inside a string is skipped.
+const scanArithmetic = (text: string, nested: Nested): void => {
+  let i = 0
+  while (i < text.length) {
+    const c = text[i]!
+    if (c === "\\") {
+      i += 2
+      continue
+    }
+    if (c === "'" || c === '"' || c === "`") {
+      const end = text.indexOf(c, i + 1)
+      if (end < 0) throw new Error("unterminated quote")
+      i = end + 1
+      continue
+    }
+    if (c === "$" && text[i + 1] === "(") {
+      const [inner, next] = captureParens(text, i + 2)
+      if (inner.startsWith("(")) scanArithmetic(inner, nested)
+      else nested(inner)
+      i = next
+      continue
+    }
+    i++
+  }
+}
+
 // Reads $NAME, ${NAME}, `…`, $(…) and $((…)) at text[i]. Substituted commands are reported to
 // `nested` and kept verbatim in the word; variables expand from env or stay literal.
 const readDollar = (text: string, i: number, env: Env, nested: Nested): [piece: string, next: number] => {
@@ -174,8 +202,10 @@ const readDollar = (text: string, i: number, env: Env, nested: Nested): [piece: 
   }
   if (after === "(") {
     const [inner, next] = captureParens(text, i + 2)
-    // "$( (" is an arithmetic expansion: its content is not run as commands.
-    if (!inner.startsWith("(")) nested(inner)
+    // "$( (" is an arithmetic expansion: its content is not run as commands, though a
+    // command substitution inside it is.
+    if (inner.startsWith("(")) scanArithmetic(inner, nested)
+    else nested(inner)
     return [text.slice(i, next), next]
   }
   const name = /^[A-Za-z_]\w*/.exec(text.slice(i + 1))?.[0]
