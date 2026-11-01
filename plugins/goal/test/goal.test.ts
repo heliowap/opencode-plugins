@@ -595,6 +595,17 @@ describe("idle turns back off and wait for child sessions (#6)", () => {
     })
   })
 
+  test("a child ending never pushes an already-scheduled continuation later", () => {
+    expect(step(active({ idleTurns: 3, continueAt: 122_000 }), { _tag: "ChildEnded", running: 0, delayMs: 120_000 }, T1)).toEqual({
+      goal: active({ idleTurns: 3, continueAt: 122_000 }),
+      effect: { _tag: "None" },
+    })
+    expect(step(active({ idleTurns: 3, continueAt: 962_000 }), { _tag: "ChildEnded", running: 0, delayMs: 120_000 }, T1)).toEqual({
+      goal: active({ idleTurns: 3, continueAt: 962_000 }),
+      effect: { _tag: "None" },
+    })
+  })
+
   test("a child ending while siblings still run does nothing", () => {
     expect(step(active(), { _tag: "ChildEnded", running: 1, delayMs: 120_000 }, T1)).toEqual({
       goal: active(),

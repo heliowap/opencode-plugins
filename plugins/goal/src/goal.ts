@@ -325,6 +325,7 @@ export const step = (goal: Goal | undefined, event: GoalEvent, now: number): Ste
     case "ChildEnded": {
       if (goal.status !== "active" || event.running > 0) return unchanged
       const at = now + idleDelay(continuationDelay(event.delayMs), goal.idleTurns ?? 0)
+      if ((goal.continueAt ?? Number.POSITIVE_INFINITY) <= at) return unchanged
       return update({ continueAt: at }, { _tag: "Cooldown", at })
     }
   }
