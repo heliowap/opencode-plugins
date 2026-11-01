@@ -49,9 +49,17 @@ There is no automatic approval based on an agent's answer.
     script lines that call a file-writing API on that path.
 
   The denial message tells the agent to ask you first.
-- **Approval.** The agent must ask through the question tool, with exactly
-  this question: "Do you want to proceed with editing AGENTS.md?".
-  Only the answer `Yes` (that option alone, not a custom answer) unlocks edits.
+- **Approval.** The denial message tells the agent to call the question tool
+  with a ready-made input:
+
+  ```text
+  Stop and call the question tool with exactly this input, then retry only if the answer is "Yes":
+  {"questions":[{"header":"AGENTS.md edit","question":"Do you want to proceed with editing AGENTS.md?","options":[{"label":"Yes","description":"apply the edit"},{"label":"No","description":"leave it unchanged"}]}]}
+  If you cannot use the question tool, report this to your parent.
+  ```
+
+  Only the answer `Yes` to "Do you want to proceed with editing AGENTS.md?"
+  (that option alone, not a custom answer) unlocks edits.
 - **Scope of the approval.** It applies to every `AGENTS.md` in that session
   only, and lasts until your next message in it.
 - **Works with `session.permissions: autoaccept`.** The plugin denies instead
