@@ -143,6 +143,15 @@ test("a write API path variable assigned AGENTS.md in the same script flags", ()
   expect(flagsShellCommand(`python3 -c "open('f','w').write('x'); f='AGENTS.md'"`)).toBe(false)
 })
 
+test("a heredoc body is judged only when its receiver executes it", () => {
+  expect(flagsShellCommand("cat <<EOF\nrm AGENTS.md\nEOF")).toBe(false)
+  expect(flagsShellCommand("tee notes.md <<EOF\nrm AGENTS.md\nEOF")).toBe(false)
+  expect(flagsShellCommand("sh <<EOF\nrm AGENTS.md\nEOF")).toBe(true)
+  expect(flagsShellCommand("eval <<EOF\nrm AGENTS.md\nEOF")).toBe(true)
+  expect(flagsShellCommand("ssh host <<EOF\nrm AGENTS.md\nEOF")).toBe(true)
+  expect(flagsShellCommand("cat <<EOF | sh\nrm AGENTS.md\nEOF")).toBe(true)
+})
+
 test("a VAR=value word after the command is an argument, not an assignment", () => {
   expect(flagsShellCommand("echo F=AGENTS.md; rm $F")).toBe(false)
   expect(flagsShellCommand("F=AGENTS.md; rm $F")).toBe(true)

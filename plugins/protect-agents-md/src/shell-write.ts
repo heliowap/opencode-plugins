@@ -677,15 +677,63 @@ const flagsExec = (argv: readonly string[], stdinNames: boolean, run: (inner: st
   return argv.some((word) => scriptFlags(word, run))
 }
 
+// Receivers whose stdin is a command line: shells and eval run it, and ssh feeds it to the
+// remote shell, which is still a command worth judging.
+const STDIN_EXECS = new Set(["sh", "bash", "zsh", "dash", "ksh", "ash", "fish", "eval", "ssh"])
+// An interpreter also runs stdin as its program when argv holds no script file and no option
+// supplies the program instead ("-c", "-e", "-m", …). Options in "value" consume a separate
+// argument that is neither a script file nor the program.
+const INTERPRETER_OPTS: Record<string, { program: ReadonlySet<string>; value: ReadonlySet<string> }> = {
+  python: { program: new Set(["-c", "-m"]), value: new Set(["-W", "-X"]) },
+  node: { program: new Set(["-e", "-p", "--eval", "--print", "--check"]), value: new Set(["-r", "--require", "--loader", "--import", "--conditions", "-C", "--env-file", "--icu-data-dir", "--redirect-warnings", "--title", "--diagnostic-dir"]) },
+  perl: { program: new Set(["-e", "-E"]), value: new Set(["-m", "-M", "-I", "-F", "-x", "-C"]) },
+  ruby: { program: new Set(["-e"]), value: new Set(["-r", "-I", "-C", "-X", "-S", "-E", "-F"]) },
+  php: { program: new Set(["-r", "-R", "-B", "-E", "-f", "-F"]), value: new Set(["-d", "-c", "-z"]) },
+  lua: { program: new Set(["-e"]), value: new Set(["-l"]) },
+}
+const interpreterOf = (cmd: string): (typeof INTERPRETER_OPTS)[string] | undefined => {
+  if (/^(?:python|pypy)[\d.]*$/.test(cmd)) return INTERPRETER_OPTS.python
+  if (/^(?:node(?:js)?|deno|bun)$/.test(cmd)) return INTERPRETER_OPTS.node
+  if (/^perl[\d.]*$/.test(cmd)) return INTERPRETER_OPTS.perl
+  if (/^(?:j?ruby|rbx)[\d.]*$/.test(cmd)) return INTERPRETER_OPTS.ruby
+  if (/^php[\d.-]*$/.test(cmd)) return INTERPRETER_OPTS.php
+  if (/^lua(?:jit)?[\d.]*$/.test(cmd)) return INTERPRETER_OPTS.lua
+  return undefined
+}
+const stdinIsProgram = (cmd: string, args: readonly string[]): boolean => {
+  const opts = interpreterOf(cmd)
+  if (opts === undefined) return false
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (arg === "-") continue
+    if (!arg.startsWith("-")) return false
+    if (opts.program.has(arg)) return false
+    if (opts.value.has(arg)) i++
+  }
+  return true
+}
+
+// A heredoc body is judged only when a command that executes stdin receives it: the command
+// it is written on, or a later stage of the same pipeline (cat <<EOF | sh). For data sinks
+// such as cat or tee the body is inert and is not analyzed.
+const stdinRunner = (simple: Simple): boolean => {
+  const { cmd, args } = unwrap(simple.argv)
+  return STDIN_EXECS.has(cmd) || stdinIsProgram(cmd, args)
+}
+
 const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: string) => boolean): boolean => {
   if (simple.redirects.some((redirect) => redirect.write && NAMES.test(redirect.target))) return true
   const names = (word: string) => NAMES.test(word)
+  const position = stages.indexOf(simple)
   const stdinNames = stages
-    .slice(0, stages.indexOf(simple))
+    .slice(0, position)
     .filter((stage) => stage.pipeline === simple.pipeline)
     .some((stage) => stage.argv.some(names))
   if (flagsExec(simple.argv, stdinNames, run)) return true
-  return simple.heredocs.some((body) => run(body))
+  if (simple.heredocs.length === 0) return false
+  const executed =
+    stdinRunner(simple) || stages.slice(position + 1).some((stage) => stage.pipeline === simple.pipeline && stdinRunner(stage))
+  return executed && simple.heredocs.some((body) => run(body))
 }
 
 const analyze = (text: string, env: Env): boolean => {
