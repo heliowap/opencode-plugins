@@ -18,6 +18,7 @@ const DOTENV = [
   "SHORT_KEY=abc",
   "TRAILING_SECRET=trail-secret-11   # trailing comment",
   "QUOTED_SECRET='single-secret-55'",
+  `QUOTED_COMMENT_SECRET="quoted-comment-66" # trailing comment`,
 ].join("\n")
 
 test.each([
@@ -42,6 +43,7 @@ test("parseDotenv strips quotes, export and trailing comments", () => {
     ["SHORT_KEY", "abc"],
     ["TRAILING_SECRET", "trail-secret-11"],
     ["QUOTED_SECRET", "single-secret-55"],
+    ["QUOTED_COMMENT_SECRET", "quoted-comment-66"],
   ])
 })
 
@@ -52,6 +54,7 @@ test("dotenvSecrets keeps only secret-named values of 12+ characters", () => {
     "synthetic-secret-99",
     "trail-secret-11",
     "single-secret-55",
+    "quoted-comment-66",
   ])
 })
 
