@@ -128,6 +128,14 @@ test("eval arguments join into a command that is analyzed again", () => {
   expect(flagsShellCommand("eval cat AGENTS.md")).toBe(false)
 })
 
+test("ssh -o options that run a local command are judged", () => {
+  expect(flagsShellCommand("ssh -o ProxyCommand='rm AGENTS.md' host")).toBe(true)
+  expect(flagsShellCommand("ssh -o LocalCommand='rm AGENTS.md' host")).toBe(true)
+  expect(flagsShellCommand("ssh -o PermitLocalCommand=yes -o LocalCommand='rm AGENTS.md' host")).toBe(true)
+  expect(flagsShellCommand("ssh -oProxyCommand='rm AGENTS.md' host")).toBe(true)
+  expect(flagsShellCommand("ssh -o ProxyCommand='cat AGENTS.md' host")).toBe(false)
+})
+
 test("a VAR=value word after the command is an argument, not an assignment", () => {
   expect(flagsShellCommand("echo F=AGENTS.md; rm $F")).toBe(false)
   expect(flagsShellCommand("F=AGENTS.md; rm $F")).toBe(true)

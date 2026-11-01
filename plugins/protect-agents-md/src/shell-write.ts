@@ -599,8 +599,16 @@ const flagsExec = (argv: readonly string[], stdinNames: boolean, run: (inner: st
   const { cmd, args, cmdString } = unwrap(argv)
   // An option like flock's "-c" carries a command string: it is analyzed as a command.
   if (cmdString !== undefined && run(cmdString)) return true
-  // The remote command of ssh runs on another machine; only its local redirects count.
-  if (cmd === "ssh") return false
+  if (cmd === "ssh") {
+    // The remote command runs on another machine, but -o options that carry a command
+    // (ProxyCommand, LocalCommand) run it locally, so only those option values are judged.
+    for (const [index, arg] of args.entries()) {
+      const value = arg === "-o" ? args[index + 1] : arg.startsWith("-o") ? arg.slice(2) : undefined
+      const option = value === undefined ? null : /^([A-Za-z]+)\s*(?:=|\s)\s*(.*)$/s.exec(value)
+      if (option !== null && /^(?:proxycommand|localcommand)$/i.test(option[1]!) && run(option[2]!)) return true
+    }
+    return false
+  }
   const names = (word: string) => NAMES.test(word)
   // eval joins its arguments into one command line and runs it.
   if (cmd === "eval" && args.length > 0 && run(args.join(" "))) return true
