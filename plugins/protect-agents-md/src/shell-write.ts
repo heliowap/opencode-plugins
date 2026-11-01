@@ -677,9 +677,9 @@ const flagsExec = (argv: readonly string[], stdinNames: boolean, run: (inner: st
   return argv.some((word) => scriptFlags(word, run))
 }
 
-// Receivers whose stdin is a command line: shells and eval run it, and ssh feeds it to the
-// remote shell, which is still a command worth judging.
-const STDIN_EXECS = new Set(["sh", "bash", "zsh", "dash", "ksh", "ash", "fish", "eval", "ssh"])
+// Receivers whose stdin is a command line: shells and eval run it, at and batch queue it to
+// run later, and ssh feeds it to the remote shell — still a command worth judging.
+const STDIN_EXECS = new Set(["sh", "bash", "zsh", "dash", "ksh", "ash", "fish", "eval", "ssh", "at", "batch"])
 // An interpreter also runs stdin as its program when argv holds no script file and no option
 // supplies the program instead ("-c", "-e", "-m", …). Options in "value" consume a separate
 // argument that is neither a script file nor the program.
