@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { continuationDelay, decodeGoal, isUnfinished, retryDelays, step, updateRefusal, type Goal } from "../src/goal.ts"
+import { continuationDelay, decodeGoal, isUnfinished, pauseOnRestart, retryDelays, step, updateRefusal, type Goal } from "../src/goal.ts"
 
 const T0 = 1_000
 const T1 = 2_000
@@ -790,6 +790,19 @@ describe("retryDelays", () => {
     ["not a list", "1,2,3", [30_000, 120_000, 300_000]],
   ] as const)("%s", (_name, option, expected) => {
     expect(retryDelays(option)).toEqual([...expected])
+  })
+})
+
+describe("pauseOnRestart (#9)", () => {
+  test.each([
+    [undefined, false],
+    [null, false],
+    [false, false],
+    [true, true],
+    ["true", false],
+    [1, false],
+  ])("%p -> %p", (option, expected) => {
+    expect(pauseOnRestart(option)).toBe(expected)
   })
 })
 
