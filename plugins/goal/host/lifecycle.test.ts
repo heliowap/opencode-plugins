@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { afterToolResult, CONTINUATION, count, toolNames, type Script } from "./harness/fixture.ts"
+import { afterToolResult, CONTINUATION, count, text, toolNames, toolResults, type Script } from "./harness/fixture.ts"
 import { Host, type Message } from "./harness/host.ts"
 
 const TIMEOUT = 120_000
@@ -222,6 +222,36 @@ describe("lifecycle", () => {
       expect(host.stored(session)).toMatchObject({ status: "blocked", emptyTurns: 3 })
       expect(continuations(await host.messages(session))).toBe(3)
       expect(host.fixture.agentRequests()).toHaveLength(6)
+    },
+    TIMEOUT,
+  )
+
+  test(
+    "A18 two steps of one goal turn receive byte-identical goal_context (#5)",
+    async () => {
+      host = await Host.start({
+        script: (request) => {
+          const results = toolResults(request).length
+          if (results === 0) return { tool: "write", args: { path: "a.txt", content: "1" } }
+          if (results === 1) return { tool: "goal_update", args: { status: "complete", note: "done" } }
+          return { text: "Done." }
+        },
+      })
+      const session = await host.session()
+      await host.goal(session, "stable context")
+      await host.settle(session)
+
+      const contexts = host.fixture.agentRequests().map((request) => {
+        const system = request.messages.filter((message) => message.role === "system").map(text).join("\n")
+        return /<goal_context>[\s\S]*?<\/goal_context>/.exec(system)?.[0]
+      })
+      expect(contexts).toHaveLength(3)
+      expect(contexts[0]).toBeDefined()
+      expect(contexts[1]).toBe(contexts[0])
+      // The goal settled, so the last request's system text carries no goal_context, while usage kept counting.
+      expect(contexts[2]).toBeUndefined()
+      // The two goal-context requests differed in charged usage (120 then 240), so identical text is not vacuous.
+      expect(host.stored(session)).toMatchObject({ status: "complete", tokensUsed: 240 })
     },
     TIMEOUT,
   )
