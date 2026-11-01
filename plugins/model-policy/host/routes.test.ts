@@ -49,6 +49,24 @@ describe("model-policy with the catalog filter and the user-only block", () => {
   )
 
   test(
+    "a config-defined anthropic/claude-opus-* model survives the catalog transform but is rejected at dispatch",
+    async () => {
+      const { host } = await run({
+        catalog: { anthropic: { "claude-opus-9-9": "claude" } },
+        script: dispatch({ agent: "general", model: "anthropic/claude-opus-9-9" }),
+      })
+      const kept = (await catalogOf(host)).map(key)
+
+      // A claude-family model the filter matches, but OpenCode re-adds config-defined
+      // models in its own transform registered after external ones.
+      expect(kept).toContain("anthropic/claude-opus-9-9")
+      expect(parentResult(host)).toContain("anthropic/claude-opus-9-9 is user-only")
+      expect(host.fixture.agentCalls("anthropic")).toEqual([])
+    },
+    TIMEOUT,
+  )
+
+  test(
     "the catalog loses non-allowed Anthropic and OpenAI family models and keeps the approved ones",
     async () => {
       const { host } = await run({ catalog: CATALOG, script: () => ({ text: "idle" }) })
