@@ -81,7 +81,8 @@ There is no automatic approval based on an agent's answer.
   script assigns `AGENTS.md` to. A heredoc body counts only when the
   receiving command executes stdin — a shell, `eval`, `ssh`, an interpreter
   reading its program, or a later pipeline stage — not when a data sink such
-  as `cat` consumes it. If a command cannot be parsed the match falls back
+  as `cat` consumes it; pipeline output feeding such a command is judged as
+  commands too. If a command cannot be parsed the match falls back
   to a textual scan, and a write whose target the text does not show (a
   path computed at runtime, a script file) is not caught either way; use
   the process guard for that.
