@@ -334,4 +334,26 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
     },
     TIMEOUT,
   )
+
+  test(
+    "T9 the animated badge stays clickable across spinner frames",
+    async () => {
+      host = await Host.start({
+        script: () => ({ text: "Step.", delayMs: 4_000 }),
+        ...(process.env.GOAL_PLUGIN_SPEC && { pluginSpec: process.env.GOAL_PLUGIN_SPEC }),
+      })
+      const session = await host.session()
+      await host.goal(session, "control me from the badge")
+      open(session)
+      await shows(running("120"))
+
+      for (let index = 0; index < 30; index++) {
+        await click(/goal (running|active)/)
+        await sees(["Pause goal"])
+        type("Escape")
+        await waitFor(() => !screen().includes("Pause goal"), "the goal controls did not close.")
+      }
+    },
+    TIMEOUT,
+  )
 })
