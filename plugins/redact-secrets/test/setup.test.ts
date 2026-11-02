@@ -87,6 +87,40 @@ test("execute.before rejects an edit input whose placeholder has an unknown id",
     )
   }))
 
+// A placeholder the masker can resolve is still a refusal outside the
+// content-bearing fields: the key's role is unknown, so resolving it could
+// land the secret in a file location.
+test("execute.before rejects a write input whose placeholder sits under an unknown key", () =>
+  withSetup((hooks) => {
+    const before = hooks.get("tool.execute.before")!
+    const after = hooks.get("tool.execute.after")!
+    const seen = { tool: "read", status: "completed", result: { content: `token ${SECRET}` } }
+    after(seen as never)
+    const placeholder = seen.result.content.match(/\[REDACTED:[0-9a-f]{8}\]/)![0]
+
+    const event = { tool: "write", input: { file: placeholder, content: "x" } }
+    expect(() => before(event as never)).toThrow(
+      `Edit input contains the placeholder "${placeholder}", which cannot be resolved. Re-read the lines you want to change and write the edit again without the placeholder.`,
+    )
+  }))
+
+test("execute.before rejects a patch whose indented Add File header carries a placeholder", () =>
+  withSetup((hooks) => {
+    const before = hooks.get("tool.execute.before")!
+    const after = hooks.get("tool.execute.after")!
+    const seen = { tool: "read", status: "completed", result: { content: `token ${SECRET}` } }
+    after(seen as never)
+    const placeholder = seen.result.content.match(/\[REDACTED:[0-9a-f]{8}\]/)![0]
+
+    const event = {
+      tool: "patch",
+      input: { patchText: `*** Begin Patch\n  *** Add File: ${placeholder}\n+x\n*** End Patch\n` },
+    }
+    expect(() => before(event as never)).toThrow(
+      `Edit input contains the placeholder "${placeholder}", which cannot be resolved. Re-read the lines you want to change and write the edit again without the placeholder.`,
+    )
+  }))
+
 test("execute.before leaves a read input with a mask-shaped path alone", () =>
   withSetup((hooks) => {
     const before = hooks.get("tool.execute.before")!

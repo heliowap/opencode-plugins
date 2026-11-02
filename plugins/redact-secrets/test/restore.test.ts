@@ -1,3 +1,4 @@
+import { Patch } from "@opencode/util/patch"
 import { expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -137,6 +138,51 @@ test("a unified diff header path holding a placeholder is rejected", () => {
 test("a placeholder nested under a path key is not resolved", () => {
   const input = { path: "note.txt", edits: [{ path: PATH_PLACEHOLDER, newString: "x" }] }
   expect(restore("edit", input, pathMasker.lookup)).toEqual(pathRejection)
+})
+
+// A placeholder outside the content-bearing fields is never restored: the
+// field's role is unknown, so resolving it could land the secret in a file
+// location the host then writes to.
+test.each(["file", "target", "newPath", "oldPath", "filename", "destination"])(
+  "a placeholder under the %s key is rejected, never resolved",
+  (key) => {
+    const input = { [key]: PATH_PLACEHOLDER, content: "clobbered\n" }
+    expect(restore("write", input, pathMasker.lookup)).toEqual(pathRejection)
+  },
+)
+
+test("a placeholder inside an array under a path-ish key is rejected", () => {
+  const input = { files: [PATH_PLACEHOLDER], content: "clobbered\n" }
+  expect(restore("write", input, pathMasker.lookup)).toEqual(pathRejection)
+})
+
+test("a placeholder under an unknown key nested in a content field is rejected", () => {
+  const input = { path: "note.txt", content: { file: PATH_PLACEHOLDER } }
+  expect(restore("write", input, pathMasker.lookup)).toEqual(pathRejection)
+})
+
+// The host patch parser trims every header line, so a header that is indented
+// still names the file the patch writes. A placeholder there must reject.
+test("an indented Add File header the host parser accepts is rejected", () => {
+  const patchText = `*** Begin Patch\n  *** Add File: ${PATH_PLACEHOLDER}\n+x\n*** End Patch\n`
+  expect(Patch.parse(patchText)).toEqual(
+    expect.objectContaining({
+      _tag: "Success",
+      success: [{ type: "add", path: PATH_PLACEHOLDER, contents: "x" }],
+    }),
+  )
+  expect(restore("patch", { patchText }, pathMasker.lookup)).toEqual(pathRejection)
+})
+
+test.each([
+  `\t*** Add File: ${PATH_PLACEHOLDER}\n+x`,
+  `  *** Update File: ${PATH_PLACEHOLDER}\n@@\n-x\n+y`,
+  `  *** Delete File: ${PATH_PLACEHOLDER}`,
+  `*** Update File: note.txt\n  *** Move to: ${PATH_PLACEHOLDER}\n@@\n-x\n+y`,
+  `  --- a/${PATH_PLACEHOLDER}\n  +++ b/${PATH_PLACEHOLDER}`,
+])("an indented header line %j is rejected", (body) => {
+  const patchText = `*** Begin Patch\n${body}\n*** End Patch\n`
+  expect(restore("patch", { patchText }, pathMasker.lookup)).toEqual(pathRejection)
 })
 
 test("the same value always gets the same id within a masker", () => {
