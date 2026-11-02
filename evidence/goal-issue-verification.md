@@ -18,8 +18,14 @@ The 12 active steps in the first turn had strictly increasing cache reads:
 
 The full goal window contained 14 assistant steps and 161,782 cache-read tokens
 out of 169,850 total input tokens, a 0.9525 hit ratio. The goal completed.
-The measurement script is `evidence/goal-cache-check.ts`; running it requires
-the configured live provider and may incur model charges.
+The selector used the status at step end. A local host reproduction showed
+that `goal_update` can complete the goal before the step ends, excluding a
+request that contained `goal_context`. The hit ratio remains valid, but this
+run does not prove growth across every step that started with an active goal.
+
+The measurement script now selects by status at step start. A live run of the
+corrected script is outstanding; it requires the configured provider and may
+incur model charges.
 
 ## Issue #16
 
