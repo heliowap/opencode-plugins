@@ -74,15 +74,17 @@ const COPY_WRITE = new RegExp(String.raw`\b(?:renameSync|copyFileSync|os\.(?:ren
 const SHELL_OUT = /\b(?:os\.system|subprocess\.\w+|system|exec|spawn|popen)\s*\(([^)]*)\)/g
 
 // The `time` keyword (and GNU time) takes options before the timed command; only these
-// consume a separate value.
+// consume a separate value, and "-o"/"--output" writes the file it names.
 const TIME_VALUE_OPTS = new Set(["-f", "--format", "-o", "--output"])
+const TIME_WRITE_OPTS = new Set(["-o", "--output"])
 
 // Commands whose argv[0] wraps another command; option-with-value arguments are skipped so the
 // wrapped command becomes argv[0]. env and sudo also take VAR=value words, timeout takes a
 // duration. "cmdOpts" are options whose value is itself a command string (flock -c),
 // "positional" counts leading operands that are not the command (chroot's directory, flock's
-// lock file, taskset's mask), and "positionalOpts" are value options that satisfy that
-// operand themselves (taskset -c gives the mask inline).
+// lock file, taskset's mask), "positionalOpts" are value options that satisfy that
+// operand themselves (taskset -c gives the mask inline), and "writeOpts" are options whose
+// value is an output file the wrapper writes (GNU time -o).
 const WRAPPERS: Record<
   string,
   {
@@ -91,6 +93,7 @@ const WRAPPERS: Record<
     positional?: number
     cmdOpts?: ReadonlySet<string>
     positionalOpts?: ReadonlySet<string>
+    writeOpts?: ReadonlySet<string>
   }
 > = {
   sudo: {
@@ -110,7 +113,7 @@ const WRAPPERS: Record<
   watch: { opts: new Set(["-n", "--interval"]) },
   stdbuf: { opts: new Set(["-i", "-o", "-e", "--input", "--output", "--error"]) },
   sshpass: { opts: new Set(["-p", "-f", "-d", "-o", "--option"]) },
-  time: { opts: TIME_VALUE_OPTS },
+  time: { opts: new Set(["-f", "--format"]), writeOpts: new Set(["-o", "--output"]) },
   busybox: { opts: new Set() },
   setsid: { opts: new Set() },
   chroot: { opts: new Set(["--userspec", "--groups"]), positional: 1 },
@@ -389,15 +392,20 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
   // "opts" while the words of a `time` keyword's option list are being skipped;
   // "value" when the next word is the value of a time option.
   let timeState: "off" | "opts" | "value" = "off"
+  let timeOpt = ""
   let i = 0
 
   const pushWord = (word: string) => {
     if (timeState === "value") {
       timeState = "opts"
+      if (TIME_WRITE_OPTS.has(timeOpt)) redirects.push({ write: true, target: word })
       return
     }
     if (timeState === "opts" && word.startsWith("-")) {
-      if (TIME_VALUE_OPTS.has(word)) timeState = "value"
+      if (TIME_VALUE_OPTS.has(word)) {
+        timeOpt = word
+        timeState = "value"
+      }
       return
     }
     timeState = "off"
@@ -578,21 +586,35 @@ const scriptFlags = (text: string, run: (inner: string) => boolean): boolean => 
 // Drops leading VAR=value words and command wrappers (sudo, env, nice, …) so argv[0] is the
 // command that actually runs. An option that carries a command string (flock -c) is reported
 // as "cmdString"; options may sit on either side of a wrapper's positional operands.
-const unwrap = (argv: readonly string[]): { cmd: string; args: readonly string[]; cmdString?: string } => {
+const unwrap = (
+  argv: readonly string[],
+): { cmd: string; args: readonly string[]; cmdString?: string; writes: readonly string[] } => {
   let i = 0
   let cmdString: string | undefined
+  const writes: string[] = []
   for (;;) {
     if (/^[A-Za-z_]\w*=/.test(argv[i] ?? "")) {
       i++
       continue
     }
     const wrapper = WRAPPERS[basenameOf(argv[i] ?? "")]
-    if (wrapper === undefined) return { cmd: basenameOf(argv[i] ?? ""), args: argv.slice(i + 1), cmdString }
+    if (wrapper === undefined) return { cmd: basenameOf(argv[i] ?? ""), args: argv.slice(i + 1), cmdString, writes }
     i++
     let positional = wrapper.positional ?? 0
     for (;;) {
       while (i < argv.length && argv[i]!.startsWith("-")) {
         const opt = argv[i]!
+        const writeOpt = [...(wrapper.writeOpts ?? [])].find((o) => opt === o || opt.startsWith(`${o}=`))
+        if (writeOpt !== undefined) {
+          if (opt === writeOpt) {
+            if (argv[i + 1] !== undefined) writes.push(argv[i + 1]!)
+            i += 2
+            continue
+          }
+          writes.push(opt.slice(writeOpt.length + 1))
+          i += 1
+          continue
+        }
         if (wrapper.cmdOpts?.has(opt)) {
           if (argv[i + 1] !== undefined) cmdString = argv[i + 1]
           i += 2
@@ -620,9 +642,11 @@ const unwrap = (argv: readonly string[]): { cmd: string; args: readonly string[]
 // "stdinNames" is set the command's input names AGENTS.md (an earlier pipeline stage produced
 // it), so consumers like xargs turn that name into operands of the command they run.
 const flagsExec = (argv: readonly string[], stdinNames: boolean, run: (inner: string) => boolean): boolean => {
-  const { cmd, args, cmdString } = unwrap(argv)
+  const { cmd, args, cmdString, writes } = unwrap(argv)
   // An option like flock's "-c" carries a command string: it is analyzed as a command.
   if (cmdString !== undefined && run(cmdString)) return true
+  // An option like GNU time's "-o" carries a file the command writes.
+  if (writes.some((word) => NAMES.test(word))) return true
   if (cmd === "ssh") {
     // The remote command runs on another machine, but -o options that carry a command
     // (ProxyCommand, LocalCommand) run it locally, so only those option values are judged.
