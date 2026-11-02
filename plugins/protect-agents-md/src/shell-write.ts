@@ -78,6 +78,11 @@ const SHELL_OUT = /\b(?:os\.system|subprocess\.\w+|system|exec|spawn|popen)\s*\(
 const TIME_VALUE_OPTS = new Set(["-f", "--format", "-o", "--output"])
 const TIME_WRITE_OPTS = new Set(["-o", "--output"])
 
+const attachedOption = (word: string, option: string): string | undefined => {
+  const prefix = option.startsWith("--") ? `${option}=` : option
+  return word.startsWith(prefix) && word.length > prefix.length ? word.slice(prefix.length) : undefined
+}
+
 // Commands whose argv[0] wraps another command; option-with-value arguments are skipped so the
 // wrapped command becomes argv[0]. env and sudo also take VAR=value words, timeout takes a
 // duration. "cmdOpts" are options whose value is itself a command string (flock -c),
@@ -560,7 +565,9 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
       return
     }
     if (timeState === "opts" && word.startsWith("-")) {
-      if (TIME_VALUE_OPTS.has(word)) {
+      const target = [...TIME_WRITE_OPTS].map((option) => attachedOption(word, option)).find((value) => value !== undefined)
+      if (target !== undefined) redirects.push({ write: true, target })
+      else if (TIME_VALUE_OPTS.has(word)) {
         timeOpt = word
         timeState = "value"
       }
@@ -795,14 +802,14 @@ const unwrap = (
     for (;;) {
       while (i < argv.length && argv[i]!.startsWith("-")) {
         const opt = argv[i]!
-        const writeOpt = [...(wrapper.writeOpts ?? [])].find((o) => opt === o || opt.startsWith(`${o}=`))
+        const writeOpt = [...(wrapper.writeOpts ?? [])].find((o) => opt === o || attachedOption(opt, o) !== undefined)
         if (writeOpt !== undefined) {
           if (opt === writeOpt) {
             if (argv[i + 1] !== undefined) writes.push(argv[i + 1]!)
             i += 2
             continue
           }
-          writes.push(opt.slice(writeOpt.length + 1))
+          writes.push(attachedOption(opt, writeOpt)!)
           i += 1
           continue
         }
