@@ -102,6 +102,23 @@ test("a command substitution inside arithmetic is still analyzed", () => {
   expect(flagsShellCommand("$(( $(cat AGENTS.md) + 1 ))")).toBe(false)
 })
 
+test("a brace or parenthesis word mid-command is an argument, not a command split", () => {
+  // "{", "}", "(" and ")" are shell syntax only in command position; as arguments of a
+  // running command they are literal words (an xargs placeholder, a brace expansion).
+  expect(flagsShellCommand("rm {} AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("rm {x} AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("rm {a,b}/AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("echo {} > AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("echo {} notes.md")).toBe(false)
+  expect(flagsShellCommand("find . -exec sed -i '' 1d {} +")).toBe(false)
+})
+
+test("grouping braces and subshell parentheses still open a command position", () => {
+  expect(flagsShellCommand("{ rm AGENTS.md; }")).toBe(true)
+  expect(flagsShellCommand("( rm AGENTS.md )")).toBe(true)
+  expect(flagsShellCommand("cd repo && { cat notes.md; }")).toBe(false)
+})
+
 test("a command-executing wrapper resolves the command it runs", () => {
   expect(flagsShellCommand("busybox rm AGENTS.md")).toBe(true)
   expect(flagsShellCommand("setsid rm AGENTS.md")).toBe(true)

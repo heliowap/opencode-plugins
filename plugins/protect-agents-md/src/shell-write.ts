@@ -492,7 +492,9 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
       i += text[i + 1] === "&" ? 2 : 1
       continue
     }
-    if (c === "(" || c === ")" || c === "{" || c === "}") {
+    // "(", ")", "{" and "}" are shell syntax only in command position; after a command has
+    // words they are literal word characters (an xargs "{}", a brace expansion "{a,b}").
+    if ((c === "(" || c === ")" || c === "{" || c === "}") && argv.length === 0) {
       endCommand(false)
       i++
       continue
