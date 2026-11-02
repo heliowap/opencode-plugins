@@ -23,8 +23,15 @@ that `goal_update` can complete the goal before the step ends, excluding a
 request that contained `goal_context`. The hit ratio remains valid, but this
 run does not prove growth across every step that started with an active goal.
 
-The measurement script now selects by status at step start. A live run of the
-corrected script is outstanding; it requires the configured provider and may
+At `f32afb435d408bf38fc9e5e33b57d489fd2028e1`, the corrected script selected
+steps by status at step start. The 13 active steps in the first turn, including
+the step that completed the goal, had strictly increasing cache reads:
+0; 11,593; 11,716; 11,809; 11,902; 11,995; 12,088; 12,181; 12,274;
+12,367; 12,460; 12,553; 12,646.
+
+The 14-step goal window had 154,984 cache-read tokens out of 169,205 total
+input tokens, a 0.91595 hit ratio. The goal completed. Running
+`evidence/goal-cache-check.ts` requires the configured live provider and may
 incur model charges.
 
 ## Issue #16
@@ -52,4 +59,12 @@ An instrumented local probe found that spinner updates repeatedly destroyed
 and recreated the clickable badge. In a 200-click sample, five clicks hit no
 element; after isolating the badge in a component, all 200 reached the same
 element. The new T9 host test failed before the fix and passed after it.
-Twenty consecutive installed-package T6 runs after the fix remain outstanding.
+
+At `f32afb435d408bf38fc9e5e33b57d489fd2028e1`, T6 passed once and failed on
+the second installed-package run, before the click: the badge was already at
+840 tokens, while the test was waiting for exactly 120. The run stopped at the
+first failure. Twenty consecutive installed-package passes remain outstanding.
+
+T6 now waits for a running badge with any usage, rather than the transient
+value 120. A local host probe that delayed opening the TUI until at least 480
+tokens passed; it does not replace the required installed-package runs.
