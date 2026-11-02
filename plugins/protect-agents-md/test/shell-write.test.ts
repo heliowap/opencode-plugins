@@ -293,6 +293,17 @@ test("a receiver that already has its program does not execute stdin", () => {
   expect(flagsShellCommand("cat <<EOF | sh -c 'true'\nrm AGENTS.md\nEOF")).toBe(false)
 })
 
+test("a process substitution feeding stdin is judged like a pipeline", () => {
+  // "< <(cmd)" redirects the producer's output into the command's stdin: for a
+  // stdin-executing receiver that output is program text, for xargs it is operands.
+  expect(flagsShellCommand("sh < <(echo rm AGENTS.md)")).toBe(true)
+  expect(flagsShellCommand("bash < <(printf 'rm AGENTS.md')")).toBe(true)
+  expect(flagsShellCommand("xargs rm < <(echo AGENTS.md)")).toBe(true)
+  expect(flagsShellCommand("cat < <(echo rm AGENTS.md)")).toBe(false)
+  expect(flagsShellCommand("sh < <(echo AGENTS.md)")).toBe(false)
+  expect(flagsShellCommand("diff notes.md <(echo AGENTS.md)")).toBe(false)
+})
+
 test("a bare stdin-executing receiver still judges piped commands", () => {
   expect(flagsShellCommand("echo 'rm AGENTS.md' | sh -s")).toBe(true)
   expect(flagsShellCommand("echo 'rm AGENTS.md' | sh -i")).toBe(true)
