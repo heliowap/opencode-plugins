@@ -677,9 +677,35 @@ const flagsExec = (argv: readonly string[], stdinNames: boolean, run: (inner: st
   return argv.some((word) => scriptFlags(word, run))
 }
 
-// Receivers whose stdin is a command line: shells and eval run it, at and batch queue it to
-// run later, and ssh feeds it to the remote shell — still a command worth judging.
-const STDIN_EXECS = new Set(["sh", "bash", "zsh", "dash", "ksh", "ash", "fish", "eval", "ssh", "at", "batch"])
+// Receivers whose stdin is a command line: ssh feeds it to the remote shell, and at and
+// batch queue it to run later. Shells and su execute stdin too, but only when argv does not
+// already give them a program; they are handled through SHELL_CMDS below.
+const STDIN_EXECS = new Set(["ssh", "at", "batch"])
+// Shell options that consume a separate value, so the value is not mistaken for a script
+// file. su's operands are a user and shell selection, never a script.
+const SHELL_VALUE_OPTS = new Set(["-o", "+o", "-O", "+O", "--rcfile", "--init-file", "--emulate"])
+
+// A receiver gets its program from argv, so its stdin is data to that program, not commands:
+// a shell's "-c" option or script file, su's "-c", or a "--" boundary followed by an operand.
+// su keeps scanning past operands because its first one is a user, not a script.
+const shellHasProgram = (cmd: string, args: readonly string[]): boolean => {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (/^[+-][a-zA-Z]*c[a-zA-Z]*$/.test(arg)) return true
+    if (cmd === "su") continue
+    if (cmd === "fish" && arg === "-C") {
+      i++
+      continue
+    }
+    if (arg === "--") return args[i + 1] !== undefined
+    if (SHELL_VALUE_OPTS.has(arg)) {
+      i++
+      continue
+    }
+    if (!arg.startsWith("-") && !arg.startsWith("+")) return true
+  }
+  return false
+}
 // An interpreter also runs stdin as its program when argv holds no script file and no option
 // supplies the program instead ("-c", "-e", "-m", …). Options in "value" consume a separate
 // argument that is neither a script file nor the program.
@@ -718,8 +744,14 @@ const stdinIsProgram = (cmd: string, args: readonly string[]): boolean => {
 // such as cat or tee the body is inert and is not analyzed.
 const stdinRunner = (simple: Simple): boolean => {
   const { cmd, args } = unwrap(simple.argv)
+  if (SHELL_CMDS.has(cmd)) return !shellHasProgram(cmd, args)
   return STDIN_EXECS.has(cmd) || stdinIsProgram(cmd, args)
 }
+
+// eval never reads stdin — but the textual scan flagged heredoc lines as commands of their
+// own, so a heredoc into eval keeps that stricter verdict. Only the heredoc path uses this;
+// piped stdin into eval stays inert.
+const heredocRunner = (simple: Simple): boolean => stdinRunner(simple) || unwrap(simple.argv).cmd === "eval"
 
 const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: string) => boolean): boolean => {
   if (simple.redirects.some((redirect) => redirect.write && NAMES.test(redirect.target))) return true
@@ -728,18 +760,19 @@ const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: str
   const earlier = stages.slice(0, position).filter((stage) => stage.pipeline === simple.pipeline)
   const stdinNames = earlier.some((stage) => stage.argv.some(names))
   if (flagsExec(simple.argv, stdinNames, run)) return true
+  // The heredoc overrides piped stdin: a stdin-executing receiver runs the body (or, for
+  // eval, is judged on it for parity with the textual scan).
+  if (simple.heredocs.length > 0 && heredocRunner(simple)) return simple.heredocs.some((body) => run(body))
   if (stdinRunner(simple)) {
-    // The heredoc overrides piped stdin. Otherwise the pipeline's output is this command's
-    // program text: the earlier stages' arguments are the words it may execute, judged
-    // command by command rather than as one loose line.
-    if (simple.heredocs.length > 0) return simple.heredocs.some((body) => run(body))
+    // The pipeline's output is this command's program text: the earlier stages' arguments
+    // are the words it may execute, judged command by command rather than as one loose line.
     return earlier.some((stage) => {
       const { args } = unwrap(stage.argv)
       return args.length > 0 && run(args.join(" "))
     })
   }
   if (simple.heredocs.length === 0) return false
-  const downstream = stages.slice(position + 1).some((stage) => stage.pipeline === simple.pipeline && stdinRunner(stage))
+  const downstream = stages.slice(position + 1).some((stage) => stage.pipeline === simple.pipeline && heredocRunner(stage))
   return downstream && simple.heredocs.some((body) => run(body))
 }
 

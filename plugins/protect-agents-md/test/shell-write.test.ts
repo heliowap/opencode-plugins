@@ -162,6 +162,29 @@ test("pipeline output feeding a stdin-executing command is judged", () => {
   expect(flagsShellCommand("at now <<EOF\nrm AGENTS.md\nEOF")).toBe(true)
 })
 
+test("a receiver that already has its program does not execute stdin", () => {
+  // eval runs its argv, never stdin; a shell's -c or script file is its program, and
+  // su's -c is a program while its operand is a user. Their stdin is data, not commands.
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | eval")).toBe(false)
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | sh -c 'true'")).toBe(false)
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | bash -lc 'x'")).toBe(false)
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | sh /tmp/job.sh")).toBe(false)
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | python3 -c 'x'")).toBe(false)
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | python3 /tmp/job.py")).toBe(false)
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | su -c 'true'")).toBe(false)
+  expect(flagsShellCommand("cat <<EOF | sh -c 'true'\nrm AGENTS.md\nEOF")).toBe(false)
+})
+
+test("a bare stdin-executing receiver still judges piped commands", () => {
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | sh -s")).toBe(true)
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | sh -i")).toBe(true)
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | su user")).toBe(true)
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | su -s sh user")).toBe(true)
+  // The -c program itself is still judged as a command.
+  expect(flagsShellCommand("echo 'rm AGENTS.md' | sh -c 'rm AGENTS.md'")).toBe(true)
+  expect(flagsShellCommand("su -c 'rm AGENTS.md'")).toBe(true)
+})
+
 test("a VAR=value word after the command is an argument, not an assignment", () => {
   expect(flagsShellCommand("echo F=AGENTS.md; rm $F")).toBe(false)
   expect(flagsShellCommand("F=AGENTS.md; rm $F")).toBe(true)
