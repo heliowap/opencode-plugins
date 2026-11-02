@@ -71,8 +71,37 @@ export const createMasker = (options: { readonly secrets: readonly string[]; rea
   const redact = (value: unknown): unknown => {
     if (typeof value === "string") return redactText(value)
     if (Array.isArray(value)) return value.map(redact)
+    if (typeof value !== "object" || value === null) return value
     if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redact(item)]))
-    return value
+    return redactInstance(value)
+  }
+
+  // Tool errors reach execute.after as class instances — a Schema.TaggedError
+  // or a plain Error — never plain objects. Each is rebuilt on its own
+  // prototype with every own data property masked: Error.message and stack are
+  // own properties that are not enumerable, so property descriptors, not
+  // Object.entries, carry them across. Accessors keep their getters. A
+  // slot-backed value (Date, RegExp) exposes no own string or object state, so
+  // there is nothing to mask — and rebuilding it would sever the internal slot
+  // its methods need.
+  const redactInstance = (value: object): object => {
+    const descriptors = Reflect.ownKeys(value).map(
+      (key) => [key, Reflect.getOwnPropertyDescriptor(value, key)!] as const,
+    )
+    const maskable = descriptors.some(
+      ([, descriptor]) =>
+        "value" in descriptor &&
+        (typeof descriptor.value === "string" || (typeof descriptor.value === "object" && descriptor.value !== null)),
+    )
+    if (!maskable) return value
+    const masked = descriptors.map(([key, descriptor]) => [
+      key,
+      "value" in descriptor ? { ...descriptor, value: redact(descriptor.value) } : descriptor,
+    ])
+    return Object.defineProperties(
+      Object.create(Object.getPrototypeOf(value)),
+      Object.fromEntries(masked) as PropertyDescriptorMap,
+    )
   }
 
   return { redactText, redact, lookup: (id) => values.get(id) }

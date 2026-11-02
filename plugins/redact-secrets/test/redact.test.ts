@@ -1,3 +1,4 @@
+import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import { expect, test } from "bun:test"
 import { createMasker, isLiteralValue } from "../src/redact.ts"
 
@@ -59,6 +60,64 @@ test("a known secret value is masked wherever it appears", () => {
 
 test("a known secret value is masked under a field key", () => {
   expect(withSecret.redactText("api_key=env-secret-abcdef1234")).toBe("api_key=[REDACTED:e13b71c1]")
+})
+
+// The host reports a tool failure as a class instance (a Schema.TaggedError
+// or a plain Error), never a plain object, so redact must rebuild one with the
+// secret masked while keeping the class — including Error.message, an own
+// property that is not enumerable.
+test("an Error keeps its class with message and stack masked", () => {
+  const masked = withSecret.redact(new Error("boom env-secret-abcdef1234")) as Error
+  expect(masked).toBeInstanceOf(Error)
+  expect(masked.message).toBe("boom [REDACTED:e13b71c1]")
+  expect(masked.stack?.split("\n")[0]).toBe("Error: boom [REDACTED:e13b71c1]")
+})
+
+test("the host Tool.Error keeps its tag with the field message masked", () => {
+  const error = new ToolError({ message: "failed env-secret-abcdef1234" })
+  const masked = withSecret.redact(error) as ToolError
+  expect(masked).toBeInstanceOf(ToolError)
+  expect(masked._tag).toBe("Tool.Error")
+  expect(masked.message).toBe("failed [REDACTED:e13b71c1]")
+})
+
+test("a tagged class error is masked inside a nested data message", () => {
+  class CustomError extends Error {
+    readonly _tag = "ToolError"
+    readonly data = { message: `data env-secret-abcdef1234` }
+  }
+  const masked = withSecret.redact(new CustomError("outer env-secret-abcdef1234")) as CustomError
+  expect(masked).toBeInstanceOf(CustomError)
+  expect(masked._tag).toBe("ToolError")
+  expect(masked.message).toBe("outer [REDACTED:e13b71c1]")
+  expect(masked.data).toEqual({ message: "data [REDACTED:e13b71c1]" })
+})
+
+test("a class instance nested in an array or object is masked", () => {
+  const error = new Error(`nested env-secret-abcdef1234`)
+  const masked = withSecret.redact({ errors: [error] }) as { errors: Error[] }
+  expect(masked.errors[0]).toBeInstanceOf(Error)
+  expect(masked.errors[0]!.message).toBe("nested [REDACTED:e13b71c1]")
+})
+
+test("an error reachable through cause is masked", () => {
+  const masked = withSecret.redact(new Error("outer", { cause: new Error("inner env-secret-abcdef1234") })) as Error
+  expect(masked).toBeInstanceOf(Error)
+  expect((masked.cause as Error).message).toBe("inner [REDACTED:e13b71c1]")
+})
+
+test.each([42, true, null, undefined])("leaves the atom %j unchanged", (value) => {
+  expect(withSecret.redact(value)).toBe(value)
+})
+
+test("leaves a function unchanged", () => {
+  const fn = () => "env-secret-abcdef1234"
+  expect(withSecret.redact(fn)).toBe(fn)
+})
+
+test("leaves a slot-backed value without own fields unchanged", () => {
+  const date = new Date(0)
+  expect(withSecret.redact(date)).toBe(date)
 })
 
 test.each([
