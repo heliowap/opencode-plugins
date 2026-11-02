@@ -1,3 +1,4 @@
+import { Error as ToolError } from "@opencode/plugin/promise/tool"
 import { expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -142,6 +143,19 @@ test("execute.after masks the secret inside an object error", () =>
     const after = hooks.get("tool.execute.after")!
     const event = { tool: "read", status: "error", error: { message: `failed: ${SECRET}` } }
     after(event as never)
+    expect(event.error.message).toMatch(/^failed: \[REDACTED:[0-9a-f]{8}\]$/)
+  }))
+
+test("execute.after masks the secret inside a class-instance error", () =>
+  withSetup((hooks) => {
+    const after = hooks.get("tool.execute.after")!
+    const event = {
+      tool: "read",
+      status: "error",
+      error: new ToolError({ message: `failed: ${SECRET}` }),
+    }
+    after(event as never)
+    expect(event.error).toBeInstanceOf(ToolError)
     expect(event.error.message).toMatch(/^failed: \[REDACTED:[0-9a-f]{8}\]$/)
   }))
 
