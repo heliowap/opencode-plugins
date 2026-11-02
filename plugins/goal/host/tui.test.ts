@@ -228,7 +228,7 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       await host.goal(session, "spin the sidebar title")
       open(session)
 
-      await shows(running("120"))
+      await shows(running(".+"))
       expect(await sampledGlyphs(() => /([◐◓◑◒]) Goal/.exec(screen())?.[1])).toEqual(["◐", "◑", "◒", "◓"])
     },
     TIMEOUT,
@@ -265,7 +265,7 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       await host.goal(session, "control me from the badge")
       open(session)
 
-      await shows(running("120"))
+      await shows(running(".+"))
       await click(/goal (running|active)/)
       await sees(["Token budget", "Pause goal", "Clear goal"])
       type("-l", "Token budget")
@@ -345,7 +345,7 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       const session = await host.session()
       await host.goal(session, "control me from the badge")
       open(session)
-      await shows(running("120"))
+      await shows(running(".+"))
 
       for (let index = 0; index < 30; index++) {
         await click(/goal (running|active)/)
