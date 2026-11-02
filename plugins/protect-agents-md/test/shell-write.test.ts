@@ -190,6 +190,15 @@ test("an output option of an executor is a write target", () => {
   expect(flagsShellCommand("strace -o out.txt cat notes.md")).toBe(false)
 })
 
+test("an attached output option names the file the executor writes", () => {
+  expect(flagsShellCommand("time -oAGENTS.md cat notes.md")).toBe(true)
+  expect(flagsShellCommand("time --output=AGENTS.md cat notes.md")).toBe(true)
+  expect(flagsShellCommand("env time -oAGENTS.md cat notes.md")).toBe(true)
+  expect(flagsShellCommand("strace -oAGENTS.md cat notes.md")).toBe(true)
+  expect(flagsShellCommand("perf record -oAGENTS.md cat notes.md")).toBe(true)
+  expect(flagsShellCommand("strace -oout.txt cat notes.md")).toBe(false)
+})
+
 test("tmux executes the shell command of an executing subcommand", () => {
   expect(flagsShellCommand("tmux new-session -d 'rm AGENTS.md'")).toBe(true)
   expect(flagsShellCommand("tmux run-shell 'rm AGENTS.md'")).toBe(true)
