@@ -162,6 +162,8 @@ const XARGS_OPTS = new Set([
 ])
 // Shell grammar words that open a command position without being commands themselves.
 const KEYWORDS = new Set(["if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done", "case", "esac", "select", "function", "time", "coproc", "!"])
+// Builtins whose NAME=value operands assign in the current shell, so a later "$NAME" expands.
+const ASSIGN_BUILTINS = new Set(["export", "declare", "local", "readonly", "typeset"])
 
 interface Redirect {
   readonly write: boolean
@@ -403,10 +405,14 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
       if (word === "time") timeState = "opts"
       return
     }
-    // Shells only take VAR=value words in command position; a "name=value" argument
-    // elsewhere (echo F=x) is data and must not feed variable expansion.
+    // Shells only take VAR=value words in command position, and assignment builtins such as
+    // export bind their NAME=value operands; a "name=value" argument elsewhere (echo F=x,
+    // sudo F=x) is data and must not feed variable expansion.
     const assign = /^([A-Za-z_]\w*)=(.*)$/s.exec(word)
-    if (assign && argv.every((arg) => /^[A-Za-z_]\w*=/.test(arg))) env.set(assign[1]!, assign[2]!)
+    const commandWord = argv.find((arg) => !/^[A-Za-z_]\w*=/.test(arg))
+    if (assign && (commandWord === undefined || ASSIGN_BUILTINS.has(basenameOf(commandWord)))) {
+      env.set(assign[1]!, assign[2]!)
+    }
     argv.push(word)
   }
   const endCommand = (samePipeline: boolean) => {
