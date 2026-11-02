@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Host } from "../plugins/goal/host/harness/host.ts"
 import { parseModel, userProviders } from "../plugins/goal/host/live/providers.ts"
+import { activeStepIds } from "./goal-cache-steps.ts"
 
 const model = "cli_proxy/cpa-claude-haiku-5-5"
 const files = [
@@ -19,7 +20,7 @@ try {
     files.map((name, index) => writeFile(join(host.project, name), files[index + 1] ?? "END")),
   )
   const session = await host.session()
-  const events = host.events((type) => type === "rpc.goal.changed" || type === "session.step.ended")
+  const events = host.events((type) => type === "rpc.goal.changed" || type === "session.step.started")
   await Bun.sleep(500)
   await host.goal(
     session,
@@ -34,14 +35,7 @@ try {
     }),
   ])
   const messages = await host.messages(session)
-  const activeIds = new Set<string>()
-  let active = false
-  for (const event of events.seen) {
-    const data = event.data as { sessionID: string; goal?: { status: string }; assistantMessageID?: string }
-    if (data.sessionID !== session.id) continue
-    if (event.type === "rpc.goal.changed") active = data.goal?.status === "active"
-    if (event.type === "session.step.ended" && active && data.assistantMessageID) activeIds.add(data.assistantMessageID)
-  }
+  const activeIds = activeStepIds(events.seen, session.id)
   events.stop()
   const continuation = (message: (typeof messages)[number]) =>
     message.type === "synthetic" && String(message.text).startsWith("Continue working toward the active session goal.")
