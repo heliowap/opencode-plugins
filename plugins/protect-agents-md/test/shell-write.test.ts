@@ -90,6 +90,16 @@ test("the time keyword's own options are skipped before the timed command", () =
   expect(flagsShellCommand("time -p cat AGENTS.md")).toBe(false)
 })
 
+test("the -o operand of GNU time is a write target", () => {
+  // The keyword and the binary both let "-o FILE" truncate and write FILE.
+  expect(flagsShellCommand("time -o AGENTS.md cat notes.md")).toBe(true)
+  expect(flagsShellCommand("time --output AGENTS.md cat notes.md")).toBe(true)
+  expect(flagsShellCommand("env time -o AGENTS.md cat notes.md")).toBe(true)
+  expect(flagsShellCommand("time -o out.txt rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("time -o out.txt cat notes.md")).toBe(false)
+  expect(flagsShellCommand("time -f '%e' cat AGENTS.md")).toBe(false)
+})
+
 test("a clustered shell option containing c takes the next argument as a command", () => {
   expect(flagsShellCommand("bash -lc 'rm AGENTS.md'")).toBe(true)
   expect(flagsShellCommand("zsh -fc 'rm AGENTS.md'")).toBe(true)
