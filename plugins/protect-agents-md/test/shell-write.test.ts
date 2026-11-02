@@ -212,6 +212,17 @@ test("a wrapper that defaults to a shell executes stdin", () => {
   expect(flagsShellCommand("echo rm AGENTS.md | sudo rm")).toBe(false)
 })
 
+test("a coproc command is judged under both name interpretations", () => {
+  // For a simple command bash runs the first word itself; the word could also be the
+  // NAME of a compound coproc, so the remaining words are judged as a command too.
+  expect(flagsShellCommand("coproc rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("coproc FOO rm AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("coproc FOO { rm AGENTS.md; }")).toBe(true)
+  expect(flagsShellCommand("coproc { rm AGENTS.md; }")).toBe(true)
+  expect(flagsShellCommand("coproc cat AGENTS.md")).toBe(false)
+  expect(flagsShellCommand("coproc FOO cat AGENTS.md")).toBe(false)
+})
+
 test("eval arguments join into a command that is analyzed again", () => {
   expect(flagsShellCommand("eval rm AGENTS.md")).toBe(true)
   expect(flagsShellCommand("eval 'rm' 'AGENTS.md'")).toBe(true)

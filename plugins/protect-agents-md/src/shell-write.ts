@@ -323,6 +323,9 @@ interface Simple {
   readonly redirects: Redirect[]
   readonly heredocs: string[]
   readonly pipeline: number
+  // The command followed the "coproc" keyword, so argv[0] may be a coproc NAME rather
+  // than the executed program; both readings are judged.
+  readonly coproc: boolean
 }
 type Env = Map<string, string>
 type Nested = (text: string) => void
@@ -535,6 +538,11 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
   let bodies: string[] = []
   let pending: { delim: string; stripTabs: boolean; sink: string[] }[] = []
   let pipeline = 0
+  // "coproc" was just read in command position; the next identifier word is held as a
+  // possible coproc NAME until the following token shows whether a compound command began.
+  let coprocAwait = false
+  let coprocName: string | undefined
+  let coprocSeen = false
   // "opts" while the words of a `time` keyword's option list are being skipped;
   // "value" when the next word is the value of a time option.
   let timeState: "off" | "opts" | "value" = "off"
@@ -556,8 +564,27 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
     }
     timeState = "off"
     if (argv.length === 0 && KEYWORDS.has(word)) {
+      // A keyword after "coproc NAME" opens the compound command the name applies to.
+      coprocName = undefined
       if (word === "time") timeState = "opts"
+      if (word === "coproc") {
+        coprocAwait = true
+        coprocSeen = true
+      }
       return
+    }
+    if (coprocAwait) {
+      coprocAwait = false
+      if (/^[A-Za-z_]\w*$/.test(word)) {
+        coprocName = word
+        return
+      }
+    }
+    // A plain word follows "coproc NAME": bash runs the first word as the command for a
+    // simple coproc, so it becomes argv[0] and both readings are judged later.
+    if (coprocName !== undefined) {
+      argv.push(coprocName)
+      coprocName = undefined
     }
     // Shells only take VAR=value words in command position, and assignment builtins such as
     // export bind their NAME=value operands; a "name=value" argument elsewhere (echo F=x,
@@ -570,14 +597,18 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
     argv.push(word)
   }
   const endCommand = (samePipeline: boolean) => {
+    // A held coproc NAME at a command boundary was the command itself ("coproc FOO" runs FOO).
+    if (coprocName !== undefined && argv.length === 0) argv = [coprocName]
+    coprocName = undefined
     if (argv.length > 0 || redirects.length > 0 || bodies.length > 0 || pending.length > 0) {
-      commands.push({ argv, redirects, heredocs: bodies, pipeline })
+      commands.push({ argv, redirects, heredocs: bodies, pipeline, coproc: coprocSeen })
     }
     if (!samePipeline) pipeline++
     argv = []
     redirects = []
     bodies = []
     timeState = "off"
+    coprocSeen = false
   }
   const consumeHeredocs = () => {
     for (const h of pending) {
@@ -654,7 +685,9 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
     }
     // "(", ")", "{" and "}" are shell syntax only in command position; after a command has
     // words they are literal word characters (an xargs "{}", a brace expansion "{a,b}").
+    // After "coproc NAME" an opener confirms the name by starting the compound command.
     if ((c === "(" || c === ")" || c === "{" || c === "}") && argv.length === 0) {
+      coprocName = undefined
       endCommand(false)
       i++
       continue
@@ -1003,6 +1036,16 @@ const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: str
   const earlier = stages.slice(0, position).filter((stage) => stage.pipeline === simple.pipeline)
   const stdinNames = earlier.some((stage) => stage.argv.some(names))
   if (flagsExec(simple.argv, stdinNames, run)) return true
+  // A coprocess command is judged as written and with a possible NAME word dropped,
+  // because "coproc NAME command" reads both ways and NAME words are identifiers.
+  if (
+    simple.coproc &&
+    simple.argv.length > 1 &&
+    /^[A-Za-z_]\w*$/.test(simple.argv[0]!) &&
+    flagsExec(simple.argv.slice(1), stdinNames, run)
+  ) {
+    return true
+  }
   // The heredoc overrides piped stdin: a stdin-executing receiver runs the body (or, for
   // eval, is judged on it for parity with the textual scan).
   if (simple.heredocs.length > 0 && heredocRunner(simple)) return simple.heredocs.some((body) => run(body))
