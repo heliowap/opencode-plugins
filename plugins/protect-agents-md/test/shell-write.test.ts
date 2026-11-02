@@ -245,6 +245,22 @@ test("a write API path variable assigned AGENTS.md in the same script flags", ()
   expect(flagsShellCommand(`python3 -c "open('f','w').write('x'); f='AGENTS.md'"`)).toBe(false)
 })
 
+test("a call-expression binding resolves the string the constructor takes", () => {
+  // A Path('...')/File('...') call binds its first string argument as the path value.
+  expect(flagsShellCommand(`python3 -c "from pathlib import Path; p=Path('AGENTS.md'); p.write_text('x')"`)).toBe(true)
+  expect(flagsShellCommand(`python3 -c "p=Path('AGENTS.md'); p.unlink()"`)).toBe(true)
+  expect(flagsShellCommand(`python3 -c "p=Path('notes.md'); p.write_text('x')"`)).toBe(false)
+  expect(flagsShellCommand(`python3 -c "p=Path('AGENTS.md'); p.read_text()"`)).toBe(false)
+})
+
+test("a subscript path through a literal bound in the same script flags", () => {
+  expect(flagsShellCommand(`python3 -c "d={'k':'AGENTS.md'}; open(d['k'],'w')"`)).toBe(true)
+  expect(flagsShellCommand(`python3 -c "l=['AGENTS.md']; open(l[0],'w')"`)).toBe(true)
+  expect(flagsShellCommand(`python3 -c "d={'k':'notes.md'}; open(d['k'],'w')"`)).toBe(false)
+  expect(flagsShellCommand(`python3 -c "d={'k':'AGENTS.md'}; open(d['k'],'r')"`)).toBe(false)
+  expect(flagsShellCommand(`python3 -c "open('f','w')"`)).toBe(false)
+})
+
 test("a heredoc body is judged only when its receiver executes it", () => {
   expect(flagsShellCommand("cat <<EOF\nrm AGENTS.md\nEOF")).toBe(false)
   expect(flagsShellCommand("tee notes.md <<EOF\nrm AGENTS.md\nEOF")).toBe(false)
