@@ -72,16 +72,24 @@ There is no automatic approval based on an agent's answer.
   redirect target can name the file. Wrappers that run another command are
   unwrapped (`sudo`, `env`, `nice`, `timeout`, `chroot`, `flock`, `taskset`,
   `busybox`, `setsid`, `unshare`, `nsenter`, `systemd-run`, `firejail`,
-  `time` and similar), and commands carried inside arguments are judged
-  again: an `eval` line, a shell's `-c` string, the command `xargs` runs,
-  `flock -c`, and `ssh -o` values that execute locally (`ProxyCommand`,
+  `parallel`, `runuser`, `setpriv`, `chrt`, `numactl`, `prlimit`, `setarch`,
+  `bwrap`, `proot`, `strace`, `valgrind`, `fakeroot`, `eatmydata`, `perf`,
+  `screen`, `time` and similar), and commands carried inside arguments are
+  judged again: an `eval` line, a shell's `-c` string, the command `xargs`
+  runs, `flock -c`, the shell command of an executing `tmux` subcommand, and
+  `ssh -o` values that execute locally (`ProxyCommand`,
   `LocalCommand`). The remote command of `ssh` is not inspected, since it
   writes on another machine. A `VAR=value` word assigns only in command
-  position, and a write API's path expression counts an identifier the same
-  script assigns `AGENTS.md` to. A heredoc body counts only when the
-  receiving command executes stdin — a shell, `eval`, `ssh`, an interpreter
-  reading its program, or a later pipeline stage — not when a data sink such
-  as `cat` consumes it; pipeline output feeding such a command is judged as
+  position or through an assignment builtin such as `export`, and a write
+  API's path expression counts an identifier the same script assigns
+  `AGENTS.md` to, including through a `Path('...')`-style call or a dict or
+  list literal a subscript reads. A heredoc body counts only when the
+  receiving command executes stdin — a shell, `su`, `newgrp`, `ssh`, an
+  interpreter or wrapper that defaults to a shell, `at`/`batch`, or a later
+  pipeline stage — or feeds `eval`, kept for parity with the fallback scan;
+  it does not count when a data sink such as `cat` consumes it, nor when
+  the receiver already has its program in argv (a `-c` string or a
+  script file). Pipeline output feeding such a command is judged as
   commands too. If a command cannot be parsed the match falls back
   to a textual scan, and a write whose target the text does not show (a
   path computed at runtime, a script file) is not caught either way; use
@@ -95,6 +103,14 @@ There is no automatic approval based on an agent's answer.
   parsing fails. It is not a shell sandbox. It assumes standard executables
   and trusted inherited environment and configuration. Git diff helpers and
   text conversion can run configured programs.
+- The command-executor list is a best-effort denylist, not a sandbox: an
+  exhaustive list is impossible, and a write launched through an executor
+  it does not know passes. Known gaps in that class include `sg`, `pwsh`,
+  `yash`, `env -S`, `sudoedit`, `scp`, `curl -o`, `git clean`,
+  `xargs -I{} sh -c {}`, a command hidden behind a substitution or variable
+  (`$(which rm)`, `$x` as argv0), `printf -v` bindings, `for`-loop
+  variables, and write APIs the script matcher does not model (such as
+  `fs.truncateSync`). The process guard denies these at syscall level.
 - Commands such as `/init` that create or update `AGENTS.md` also need your
   `Yes`.
 - Scripts that build the path indirectly (variables, string concatenation,
