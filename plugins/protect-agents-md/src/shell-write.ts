@@ -736,8 +736,10 @@ const shellText = (call: string): string => {
 }
 
 // A name = "value" assignment inside script text; binds the identifiers a write API's path
-// expression may use instead of a literal.
-const SCRIPT_ASSIGN = /([A-Za-z_]\w*)\s*=\s*("[^"]*"|'[^']*'|[^\s;,()'"]*)/g
+// expression may use instead of a literal. The bare-value alternative runs to the next
+// blank, ";" or ",", so a call like Path('...') or a literal like {'k': '...'} binds whole
+// and the string it carries becomes the candidate value.
+const SCRIPT_ASSIGN = /([A-Za-z_]\w*)\s*=\s*("[^"]*"|'[^']*'|[^\s;,]*)/g
 
 // A write API call in script text flags only when its own path expression names AGENTS.md,
 // either literally or through an identifier the same script assigns an AGENTS.md value.
