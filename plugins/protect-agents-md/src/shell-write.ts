@@ -1054,7 +1054,8 @@ const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: str
   })
   const stdinNames =
     earlier.some((stage) => stage.argv.some(names)) ||
-    feedSimples.some((feed) => unwrap(feed.argv).args.some(names))
+    feedSimples.some((feed) => unwrap(feed.argv).args.some(names)) ||
+    simple.heredocs.some(names)
   if (flagsExec(simple.argv, stdinNames, run)) return true
   // A coprocess command is judged as written and with a possible NAME word dropped,
   // because "coproc NAME command" reads both ways and NAME words are identifiers.

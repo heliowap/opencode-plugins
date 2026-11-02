@@ -293,6 +293,17 @@ test("a receiver that already has its program does not execute stdin", () => {
   expect(flagsShellCommand("cat <<EOF | sh -c 'true'\nrm AGENTS.md\nEOF")).toBe(false)
 })
 
+test("a heredoc or here-string feeding stdin supplies operands the same way", () => {
+  // The body of a heredoc or here-string is the command's stdin: for xargs and
+  // parallel those lines are operands of the command they run.
+  expect(flagsShellCommand("xargs rm <<EOF\nAGENTS.md\nEOF")).toBe(true)
+  expect(flagsShellCommand("xargs rm <<< AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("xargs -I{} rm {} <<< AGENTS.md")).toBe(true)
+  expect(flagsShellCommand("parallel rm <<EOF\nAGENTS.md\nEOF")).toBe(true)
+  expect(flagsShellCommand("xargs echo <<EOF\nAGENTS.md\nEOF")).toBe(false)
+  expect(flagsShellCommand("cat <<EOF\nAGENTS.md\nEOF")).toBe(false)
+})
+
 test("a process substitution feeding stdin is judged like a pipeline", () => {
   // "< <(cmd)" redirects the producer's output into the command's stdin: for a
   // stdin-executing receiver that output is program text, for xargs it is operands.
