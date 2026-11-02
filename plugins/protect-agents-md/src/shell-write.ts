@@ -81,19 +81,25 @@ const TIME_WRITE_OPTS = new Set(["-o", "--output"])
 // Commands whose argv[0] wraps another command; option-with-value arguments are skipped so the
 // wrapped command becomes argv[0]. env and sudo also take VAR=value words, timeout takes a
 // duration. "cmdOpts" are options whose value is itself a command string (flock -c),
-// "positional" counts leading operands that are not the command (chroot's directory, flock's
-// lock file, taskset's mask), "positionalOpts" are value options that satisfy that
-// operand themselves (taskset -c gives the mask inline), and "writeOpts" are options whose
-// value is an output file the wrapper writes (GNU time -o).
+// "opts2" consume two separate values (bwrap --bind SRC DEST), "positional" counts leading
+// operands that are not the command (chroot's directory, flock's lock file, taskset's mask),
+// "positionalMatch" restricts that operand to matching words (setarch's arch name),
+// "positionalOpts" are value options that satisfy the operand themselves (taskset -c gives
+// the mask inline, runuser -u names the user), "clusterValues" are letters that end a
+// short-option cluster and consume a value (screen -dmS), and "writeOpts" are options
+// whose value is an output file the wrapper writes (GNU time -o, strace -o).
 const WRAPPERS: Record<
   string,
   {
     opts: ReadonlySet<string>
     assigns?: boolean
     positional?: number
+    positionalMatch?: RegExp
     cmdOpts?: ReadonlySet<string>
     positionalOpts?: ReadonlySet<string>
     writeOpts?: ReadonlySet<string>
+    opts2?: ReadonlySet<string>
+    clusterValues?: ReadonlySet<string>
   }
 > = {
   sudo: {
@@ -152,6 +158,129 @@ const WRAPPERS: Record<
       "--blacklist", "--read-only", "--read-write", "--bind", "--tmpfs",
     ]),
   },
+  // GNU parallel runs the command word; ":::" input markers stay ordinary arguments. The
+  // option list is the common value-taking subset; with no command at all it reads jobs
+  // from stdin (handled with the other stdin executors below).
+  parallel: {
+    opts: new Set([
+      "-j", "--jobs", "-P", "--max-procs", "-N", "-n", "--max-args", "-L", "--max-lines",
+      "-C", "--colsep", "-d", "--delimiter", "-E", "-e", "--eof", "-I", "--replace", "-i",
+      "-J", "--profile", "-S", "--sshlogin", "--sshloginfile", "--slf", "-a", "--arg-file",
+      "--arg-file-sep", "-B", "--bf", "--basefile", "-s", "--max-chars", "--load",
+      "--memfree", "--nice", "--timeout", "--halt", "--halt-on-error", "--retries",
+      "--rpl", "--recstart", "--recend", "--joblog", "--results", "--result", "--res",
+      "--tmpdir", "--tempdir", "--wd", "--workdir", "--delay", "--env", "--header",
+      "--tagstring", "--compress", "--compress-program", "--semaphoretimeout", "--id",
+      "--trc", "--tarflag",
+    ]),
+  },
+  // The user operand is either the "-u" value or the first positional.
+  runuser: {
+    opts: new Set(["-u", "--user", "-g", "--group", "-s", "--shell", "-w", "--whitelist-environment"]),
+    positional: 1,
+    positionalOpts: new Set(["-u", "--user"]),
+  },
+  setpriv: {
+    opts: new Set([
+      "--ruid", "--euid", "--reuid", "--rgid", "--egid", "--regid", "--groups",
+      "--securebits", "--pdeathsig", "--selinux-label", "--apparmor-profile",
+      "--inh-caps", "--ambient-caps", "--bounding-set", "--landlock-access", "--landlock-rule",
+    ]),
+  },
+  // Policy flags are valueless; the priority (or deadline values) is the one operand.
+  chrt: {
+    opts: new Set(["-p", "--pid", "-T", "--sched-runtime", "-P", "--sched-period", "-D", "--sched-deadline"]),
+    positional: 1,
+  },
+  numactl: {
+    opts: new Set(["-N", "--cpunodebind", "-m", "--membind", "-p", "--preferred", "-c", "--physcpubind", "-i", "--interleave"]),
+  },
+  prlimit: {
+    opts: new Set([
+      "-p", "--pid", "-o", "--output",
+      "--as", "--core", "--cpu", "--data", "--fsize", "--locks", "--memlock", "--msgqueue",
+      "--nice", "--nofile", "--nproc", "--rss", "--rtprio", "--rttime", "--sigpending", "--stack",
+    ]),
+  },
+  // The first operand is an arch name only when it names one; otherwise the command starts
+  // there ("setarch -R rm x" has no arch operand). The linux32/linux64 links already carry
+  // the arch, so they take no operand.
+  setarch: {
+    opts: new Set(),
+    positional: 1,
+    positionalMatch: /^(?:i[3-6]86|x86_64|amd64|aarch64|arm\w*|alpha|hppa\w*|ia64|m68k|mips\w*|parisc\w*|ppc\w*|riscv\w*|s390x?|sh\w*|sparc\w*|uname26|linux32|linux64|loongarch\w*)$/i,
+  },
+  linux32: { opts: new Set() },
+  linux64: { opts: new Set() },
+  // bwrap options pair a source and a destination (or a variable and a value).
+  bwrap: {
+    opts: new Set([
+      "--proc", "--dev", "--dir", "--tmpfs", "--mqueue", "--remount-ro", "--size",
+      "--perms", "--chdir", "--unsetenv", "--uid", "--gid", "--hostname", "--cap-add",
+      "--cap-drop", "--userns", "--userns2", "--pidns", "--seccomp", "--add-seccomp-fd",
+      "--exec-label", "--file-label", "--proc-label", "--sync-fd", "--info-fd",
+      "--json-status-fd", "--block-fd", "--userns-block-fd", "--lock-file", "--args",
+      "--argv0", "--level-prefix", "--overlay-src", "--tmp-overlay",
+    ]),
+    opts2: new Set([
+      "--bind", "--bind-data", "--ro-bind", "--ro-bind-data", "--dev-bind",
+      "--dev-bind-data", "--symlink", "--chmod", "--setenv", "--file", "--file-data",
+      "--overlay", "--ro-overlay",
+    ]),
+  },
+  proot: {
+    opts: new Set(["-r", "-R", "-S", "--rootfs", "-b", "--bind", "-q", "--qemu", "-w", "--pwd", "--cwd", "-k", "--kernel-release"]),
+  },
+  strace: {
+    opts: new Set([
+      "-e", "--trace", "-p", "--attach", "-u", "--user", "-s", "--string-limit",
+      "-E", "--env", "-P", "--trace-path", "-X", "--const-print-style", "-U", "--uprobes",
+      "--columns", "--align", "--decode-pids", "--decode-fds", "--detach-on",
+      "--syscall-limit", "--syscall-times", "--strings-in-hex", "--secontext", "--status",
+      "--tips", "--absolute-timestamps", "--relative-timestamps",
+    ]),
+    writeOpts: new Set(["-o", "--output"]),
+  },
+  valgrind: {
+    opts: new Set([
+      "--tool", "--log-fd", "--xml-fd", "--xml-user-comment", "--num-callers",
+      "--error-exitcode", "--max-threads", "--fullpath-after", "--extra-debuginfo-path",
+      "--debuginfo-server", "--suppressions", "--sysinfo-file", "--vgdb-poll",
+      "--db-command", "--input-fd", "--max-stackframe", "--main-stacksize",
+      "--fair-sched", "--kernel-variant", "--merge-recursive-frames",
+      "--num-transtab-sectors", "--avg-transtab-entry-size", "--px-file-size",
+      "--px-default", "--soname-synonyms", "--smc-check", "--vgdb-stop-at", "--sim-hints",
+      "--progress-interval", "--progress-signal", "--keep-stacktraces", "--freelist-vol",
+      "--freelist-big-blocks", "--ignore-range-below-sp", "--sanity-level", "--gen-suppressions",
+    ]),
+    // The profiler back ends write their reports to these option targets.
+    writeOpts: new Set(["--log-file", "--xml-file", "--callgrind-out-file", "--cachegrind-out-file", "--massif-out-file"]),
+  },
+  fakeroot: {
+    opts: new Set(["-l", "--lib", "-f", "--faked", "-s", "--save-file", "-i", "--load-file", "-b", "--fd-base"]),
+  },
+  eatmydata: { opts: new Set() },
+  // perf's first operand is the subcommand (record, stat, trace, …); the union of the
+  // executing subcommands' value options is listed so their values do not hide the command.
+  perf: {
+    opts: new Set([
+      "-e", "--event", "-F", "--freq", "-c", "--count", "-p", "--pid", "-t", "--tid",
+      "-u", "--uid", "-C", "--cpu", "-G", "--cgroup", "--call-graph", "-m", "--mmap-pages",
+      "--clockid", "--filter", "--user-regs", "--intr-regs", "-I", "--interval-print",
+      "-M", "--metrics", "-r", "--repeat", "-x", "--field-separator", "--delay", "-z",
+      "--compression-level", "--mmap-flush", "--aux-output", "--control-fifo", "--control-fd",
+      "--proc-map-timeout", "--buildid-dir", "--vmlinux", "--kallsyms", "--branch-filter",
+      "--cpu-list",
+    ]),
+    writeOpts: new Set(["-o", "--output"]),
+    positional: 1,
+  },
+  // screen's single-letter options cluster freely ("-dmS name cmd"); a cluster ending in a
+  // value letter consumes the next argument.
+  screen: {
+    opts: new Set(["-S", "-p", "-c", "-s", "-t", "-e", "-T", "-h", "-r", "-R", "-x", "-X"]),
+    clusterValues: new Set(["S", "p", "c", "s", "t", "e", "T", "h", "r", "R", "x", "X"]),
+  },
 }
 const WRITER_NAMES = new Set(WRITER.slice("(?:".length, -1).split("|"))
 const IN_PLACE_CMDS = new Set(["sed", "perl", "ruby", "gsed"])
@@ -163,6 +292,23 @@ const XARGS_OPTS = new Set([
   "-I", "-J", "-L", "-n", "-P", "-s", "-E", "-e", "-d", "-a",
   "--arg-file", "--delimiter", "--eof", "--max-args", "--max-chars", "--max-lines", "--max-procs", "--replace", "--process-slot-var",
 ])
+// tmux global options that consume a separate value before the subcommand word.
+const TMUX_GLOBAL_VALUE = new Set(["-f", "-L", "-S", "-T"])
+// tmux subcommands that execute their trailing arguments as a shell command; each entry
+// lists that subcommand's options that consume a separate value so it is not judged.
+const TMUX_EXEC: Record<string, ReadonlySet<string>> = {}
+for (const [valueOpts, names] of [
+  [["-c", "-e", "-F", "-f", "-n", "-s", "-t", "-x", "-y"], ["new-session", "new"]],
+  [["-c", "-e", "-F", "-n", "-t"], ["new-window", "neww"]],
+  [["-c", "-e", "-F", "-l", "-p", "-t"], ["split-window", "splitw"]],
+  [["-d", "-F", "-t"], ["run-shell", "run"]],
+  [["-c", "-e", "-t"], ["respawn-window", "respawnw", "respawn-pane", "respawnp"]],
+  [["-t"], ["if-shell", "if"]],
+  [["-p", "-t"], ["confirm-before", "confirm"]],
+  [["-t"], ["pipe-pane", "pipep"]],
+  [["-b", "-d", "-e", "-h", "-R", "-s", "-S", "-t", "-T", "-w", "-x", "-y"], ["display-popup", "popup"]],
+  [["-N", "-t"], ["send-keys", "send"]],
+] as const) for (const name of names) TMUX_EXEC[name] = new Set(valueOpts)
 // Shell grammar words that open a command position without being commands themselves.
 const KEYWORDS = new Set(["if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done", "case", "esac", "select", "function", "time", "coproc", "!"])
 // Builtins whose NAME=value operands assign in the current shell, so a later "$NAME" expands.
@@ -588,17 +734,20 @@ const scriptFlags = (text: string, run: (inner: string) => boolean): boolean => 
 // as "cmdString"; options may sit on either side of a wrapper's positional operands.
 const unwrap = (
   argv: readonly string[],
-): { cmd: string; args: readonly string[]; cmdString?: string; writes: readonly string[] } => {
+): { cmd: string; args: readonly string[]; cmdString?: string; writes: readonly string[]; via: readonly string[] } => {
   let i = 0
   let cmdString: string | undefined
   const writes: string[] = []
+  const via: string[] = []
   for (;;) {
     if (/^[A-Za-z_]\w*=/.test(argv[i] ?? "")) {
       i++
       continue
     }
-    const wrapper = WRAPPERS[basenameOf(argv[i] ?? "")]
-    if (wrapper === undefined) return { cmd: basenameOf(argv[i] ?? ""), args: argv.slice(i + 1), cmdString, writes }
+    const name = basenameOf(argv[i] ?? "")
+    const wrapper = WRAPPERS[name]
+    if (wrapper === undefined) return { cmd: name, args: argv.slice(i + 1), cmdString, writes, via }
+    via.push(name)
     i++
     let positional = wrapper.positional ?? 0
     for (;;) {
@@ -620,15 +769,32 @@ const unwrap = (
           i += 2
           continue
         }
+        if (wrapper.opts2?.has(opt)) {
+          i += 3
+          continue
+        }
         if (wrapper.positionalOpts?.has(opt)) {
           positional = 0
           i += 2
           continue
         }
-        i += wrapper.opts.has(opt) ? 2 : 1
+        if (wrapper.opts.has(opt)) {
+          i += 2
+          continue
+        }
+        if (wrapper.clusterValues !== undefined && /^-[a-zA-Z]{2,}$/.test(opt)) {
+          i += wrapper.clusterValues.has(opt.at(-1)!) ? 2 : 1
+          continue
+        }
+        i += 1
       }
       while (wrapper.assigns === true && i < argv.length && /^[A-Za-z_]\w*=/.test(argv[i]!)) i++
-      if (positional > 0 && i < argv.length && !argv[i]!.startsWith("-")) {
+      if (
+        positional > 0 &&
+        i < argv.length &&
+        !argv[i]!.startsWith("-") &&
+        (wrapper.positionalMatch === undefined || wrapper.positionalMatch.test(argv[i]!))
+      ) {
         positional--
         i++
         continue
@@ -642,7 +808,7 @@ const unwrap = (
 // "stdinNames" is set the command's input names AGENTS.md (an earlier pipeline stage produced
 // it), so consumers like xargs turn that name into operands of the command they run.
 const flagsExec = (argv: readonly string[], stdinNames: boolean, run: (inner: string) => boolean): boolean => {
-  const { cmd, args, cmdString, writes } = unwrap(argv)
+  const { cmd, args, cmdString, writes, via } = unwrap(argv)
   // An option like flock's "-c" carries a command string: it is analyzed as a command.
   if (cmdString !== undefined && run(cmdString)) return true
   // An option like GNU time's "-o" carries a file the command writes.
@@ -660,6 +826,38 @@ const flagsExec = (argv: readonly string[], stdinNames: boolean, run: (inner: st
   const names = (word: string) => NAMES.test(word)
   // eval joins its arguments into one command line and runs it.
   if (cmd === "eval" && args.length > 0 && run(args.join(" "))) return true
+  if (cmd === "tmux") {
+    // Global options take a socket or config value; "-c" itself runs a shell command.
+    // An executing subcommand (new-session, run-shell, send-keys, …) runs the words that
+    // follow its own options as a shell command, judged both per word and joined.
+    let j = 0
+    for (; j < args.length; j++) {
+      const arg = args[j]!
+      if (arg === "-c") {
+        if (args[j + 1] !== undefined && run(args[j + 1]!)) return true
+        j++
+        continue
+      }
+      if (TMUX_GLOBAL_VALUE.has(arg)) {
+        j++
+        continue
+      }
+      if (!arg.startsWith("-")) break
+    }
+    const valueOpts = args[j] === undefined ? undefined : TMUX_EXEC[args[j]!]
+    if (valueOpts === undefined) return false
+    const rest: string[] = []
+    for (let k = j + 1; k < args.length; k++) {
+      const arg = args[k]!
+      if (valueOpts.has(arg)) {
+        k++
+        continue
+      }
+      if (arg.startsWith("-")) continue
+      rest.push(arg)
+    }
+    return rest.some((arg) => run(arg)) || (rest.length > 0 && run(rest.join(" ")))
+  }
   // A shell's "-c" argument carries a nested command, alone or inside a single-dash
   // option cluster such as "-lc" or "-ec".
   if (SHELL_CMDS.has(cmd)) {
@@ -692,6 +890,8 @@ const flagsExec = (argv: readonly string[], stdinNames: boolean, run: (inner: st
     if (stdinNames && repl !== undefined && flagsExec(rest.map((arg) => arg.replaceAll(repl, "AGENTS.md")), false, run)) return true
     if (stdinNames && repl === undefined && WRITER_NAMES.has(basenameOf(rest[0] ?? ""))) return true
   }
+  // parallel appends its stdin lines as operands to the command it runs.
+  if (stdinNames && via.includes("parallel") && WRITER_NAMES.has(cmd)) return true
   if (IN_PLACE_CMDS.has(cmd) && args.some((arg) => IN_PLACE_FLAG.test(arg)) && args.some(names)) return true
   if ((cmd === "sed" || cmd === "gsed") && args.some((arg) => /(?:^|[\s;'"/0-9p])w\s+\S*agents\.md(?:$|[^\w.])/i.test(arg))) return true
   if (cmd === "git" && args.some((arg) => GIT_SUBS.has(arg)) && args.some(names)) return true
@@ -709,10 +909,18 @@ const flagsExec = (argv: readonly string[], stdinNames: boolean, run: (inner: st
   return argv.some((word) => scriptFlags(word, run))
 }
 
-// Receivers whose stdin is a command line: ssh feeds it to the remote shell, and at and
-// batch queue it to run later. Shells and su execute stdin too, but only when argv does not
-// already give them a program; they are handled through SHELL_CMDS below.
-const STDIN_EXECS = new Set(["ssh", "at", "batch"])
+// Receivers whose stdin is a command line: ssh feeds it to the remote shell, at and batch
+// queue it to run later, and newgrp starts a shell that reads it. Shells and su execute
+// stdin too, but only when argv does not already give them a program; they are handled
+// through SHELL_CMDS below.
+const STDIN_EXECS = new Set(["ssh", "at", "batch", "newgrp"])
+// Wrappers that run a shell or read commands from stdin when argv carries no command:
+// "sudo -s", "runuser -u root", "chroot /x" and friends start a shell, and parallel reads
+// its job list from stdin.
+const STDIN_SHELL_DEFAULT = new Set([
+  "sudo", "doas", "runuser", "chroot", "unshare", "nsenter", "proot", "fakeroot",
+  "firejail", "parallel", "setarch", "linux32", "linux64",
+])
 // Shell options that consume a separate value, so the value is not mistaken for a script
 // file. su's operands are a user and shell selection, never a script.
 const SHELL_VALUE_OPTS = new Set(["-o", "+o", "-O", "+O", "--rcfile", "--init-file", "--emulate"])
@@ -775,9 +983,12 @@ const stdinIsProgram = (cmd: string, args: readonly string[]): boolean => {
 // it is written on, or a later stage of the same pipeline (cat <<EOF | sh). For data sinks
 // such as cat or tee the body is inert and is not analyzed.
 const stdinRunner = (simple: Simple): boolean => {
-  const { cmd, args } = unwrap(simple.argv)
+  const { cmd, args, via } = unwrap(simple.argv)
   if (SHELL_CMDS.has(cmd)) return !shellHasProgram(cmd, args)
-  return STDIN_EXECS.has(cmd) || stdinIsProgram(cmd, args)
+  if (STDIN_EXECS.has(cmd)) return true
+  if (stdinIsProgram(cmd, args)) return true
+  // No command operand after the wrappers: they fall back to a shell (or a job list) on stdin.
+  return cmd === "" && via.some((word) => STDIN_SHELL_DEFAULT.has(word))
 }
 
 // eval never reads stdin — but the textual scan flagged heredoc lines as commands of their
