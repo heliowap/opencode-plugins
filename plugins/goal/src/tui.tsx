@@ -177,19 +177,22 @@ export default Plugin.define({
       append: "session.composer.top",
       render: (slot) => {
         fetchGoal(slot.sessionID)
+        // Keep the clickable node mounted when only the spinner frame changes.
+        const visible = () => goalBadge(goalOf(slot.sessionID), false, 0) !== undefined
         const badge = () => {
           const running = context.data.session.status(slot.sessionID) === "running"
           return goalBadge(goalOf(slot.sessionID), running, running ? spin.frame : 0)
         }
+        const BadgeNode = () => (
+          <box flexShrink={0} paddingLeft={1}>
+            <text fg={color(context, badge()!.tone)} onMouseUp={() => void openControls(slot.sessionID)}>
+              {badge()!.text}
+            </text>
+          </box>
+        )
         return (
           <>
-            {badge() ? (
-              <box flexShrink={0} paddingLeft={1}>
-                <text fg={color(context, badge()!.tone)} onMouseUp={() => void openControls(slot.sessionID)}>
-                  {badge()!.text}
-                </text>
-              </box>
-            ) : null}
+            {visible() ? <BadgeNode /> : null}
           </>
         )
       },
