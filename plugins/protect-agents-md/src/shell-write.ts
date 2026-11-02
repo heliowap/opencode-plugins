@@ -322,6 +322,8 @@ interface Simple {
   readonly argv: string[]
   readonly redirects: Redirect[]
   readonly heredocs: string[]
+  // Input-side "<(cmd)" substitutions whose output becomes the command's stdin.
+  readonly feeds: string[]
   readonly pipeline: number
   // The command followed the "coproc" keyword, so argv[0] may be a coproc NAME rather
   // than the executed program; both readings are judged.
@@ -485,7 +487,7 @@ const readRedirect = (
   i: number,
   env: Env,
   nested: Nested,
-): [redirect: Redirect | undefined, heredoc: { delim: string; stripTabs: boolean } | undefined, body: string | undefined, next: number] => {
+): [redirect: Redirect | undefined, heredoc: { delim: string; stripTabs: boolean } | undefined, body: string | undefined, feed: string | undefined, next: number] => {
   let op = text[i]!
   i++
   const c = text[i]
@@ -515,18 +517,19 @@ const readRedirect = (
   if (op === "<<" || op === "<<-") {
     const [delim, next] = readWord(text, i, env, nested)
     if (!delim) throw new Error("heredoc without delimiter")
-    return [undefined, { delim, stripTabs: op === "<<-" }, undefined, next]
+    return [undefined, { delim, stripTabs: op === "<<-" }, undefined, undefined, next]
   }
   if ((text[i] === "<" || text[i] === ">") && text[i + 1] === "(") {
-    // A process substitution as the redirect target: the inside is a nested command.
+    // A process substitution as the redirect target: the inside is a nested command, and
+    // for an input redirect its output becomes the command's stdin.
     const [inner, next] = captureParens(text, i + 2)
     nested(inner)
-    return [{ write: op.includes(">"), target: text.slice(i, next) }, undefined, undefined, next]
+    return [{ write: op.includes(">"), target: text.slice(i, next) }, undefined, undefined, op === "<" || op === "<>" ? inner : undefined, next]
   }
   const [target, next] = readWord(text, i, env, nested)
   if (!target) throw new Error("redirect without a target")
-  if (op === "<<<") return [undefined, undefined, target, next]
-  return [{ write: op.includes(">"), target }, undefined, undefined, next]
+  if (op === "<<<") return [undefined, undefined, target, undefined, next]
+  return [{ write: op.includes(">"), target }, undefined, undefined, undefined, next]
 }
 
 // Splits the command text into simple commands. Pipeline stages share a pipeline id; heredoc
@@ -536,6 +539,7 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
   let argv: string[] = []
   let redirects: Redirect[] = []
   let bodies: string[] = []
+  let feeds: string[] = []
   let pending: { delim: string; stripTabs: boolean; sink: string[] }[] = []
   let pipeline = 0
   // "coproc" was just read in command position; the next identifier word is held as a
@@ -601,12 +605,13 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
     if (coprocName !== undefined && argv.length === 0) argv = [coprocName]
     coprocName = undefined
     if (argv.length > 0 || redirects.length > 0 || bodies.length > 0 || pending.length > 0) {
-      commands.push({ argv, redirects, heredocs: bodies, pipeline, coproc: coprocSeen })
+      commands.push({ argv, redirects, heredocs: bodies, feeds, pipeline, coproc: coprocSeen })
     }
     if (!samePipeline) pipeline++
     argv = []
     redirects = []
     bodies = []
+    feeds = []
     timeState = "off"
     coprocSeen = false
   }
@@ -664,7 +669,7 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
         continue
       }
       if (text[i + 1] === ">") {
-        const [redirect, , , next] = readRedirect(text, i + 1, env, nested)
+        const [redirect, , , , next] = readRedirect(text, i + 1, env, nested)
         i = next
         if (redirect) redirects.push(redirect)
         continue
@@ -702,22 +707,24 @@ const lex = (text: string, env: Env, nested: Nested): Simple[] => {
         i = next
         continue
       }
-      const [redirect, heredoc, body, next] = readRedirect(text, i, env, nested)
+      const [redirect, heredoc, body, feed, next] = readRedirect(text, i, env, nested)
       i = next
       if (redirect) redirects.push(redirect)
       if (heredoc) pending.push({ ...heredoc, sink: bodies })
       if (body !== undefined) bodies.push(body)
+      if (feed !== undefined) feeds.push(feed)
       continue
     }
     const [word, next] = readWord(text, i, env, nested)
     i = next
     // A bare number right before < or > is the redirection's fd, not an argument.
     if (/^\d+$/.test(word) && i < text.length && (text[i] === "<" || text[i] === ">")) {
-      const [redirect, heredoc, body, after] = readRedirect(text, i, env, nested)
+      const [redirect, heredoc, body, feed, after] = readRedirect(text, i, env, nested)
       i = after
       if (redirect) redirects.push(redirect)
       if (heredoc) pending.push({ ...heredoc, sink: bodies })
       if (body !== undefined) bodies.push(body)
+      if (feed !== undefined) feeds.push(feed)
       continue
     }
     pushWord(word)
@@ -1036,7 +1043,18 @@ const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: str
   const names = (word: string) => NAMES.test(word)
   const position = stages.indexOf(simple)
   const earlier = stages.slice(0, position).filter((stage) => stage.pipeline === simple.pipeline)
-  const stdinNames = earlier.some((stage) => stage.argv.some(names))
+  // A "< <(cmd)" feed streams the producer's output into this command's stdin the same
+  // way a pipeline does: the producer's own arguments are the stream's words.
+  const feedSimples = simple.feeds.flatMap((feed) => {
+    try {
+      return lex(feed, new Map(), run)
+    } catch {
+      return []
+    }
+  })
+  const stdinNames =
+    earlier.some((stage) => stage.argv.some(names)) ||
+    feedSimples.some((feed) => unwrap(feed.argv).args.some(names))
   if (flagsExec(simple.argv, stdinNames, run)) return true
   // A coprocess command is judged as written and with a possible NAME word dropped,
   // because "coproc NAME command" reads both ways and NAME words are identifiers.
@@ -1053,8 +1071,10 @@ const flagsSimple = (simple: Simple, stages: readonly Simple[], run: (inner: str
   if (simple.heredocs.length > 0 && heredocRunner(simple)) return simple.heredocs.some((body) => run(body))
   if (stdinRunner(simple)) {
     // The pipeline's output is this command's program text: the earlier stages' arguments
-    // are the words it may execute, judged command by command rather than as one loose line.
-    return earlier.some((stage) => {
+    // are the words it may execute, judged command by command rather than as one loose
+    // line. "< <(cmd)" feeds are judged the same way.
+    const producers = [...earlier, ...feedSimples]
+    return producers.some((stage) => {
       const { args } = unwrap(stage.argv)
       return args.length > 0 && run(args.join(" "))
     })
