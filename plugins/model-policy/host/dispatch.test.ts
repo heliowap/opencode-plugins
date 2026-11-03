@@ -75,7 +75,9 @@ describe("research dispatch", () => {
       expect(trail).toEqual({
         agent: "researcher",
         route: `${OPUS}#low`,
-        skipped: [],
+        skipped: [
+          { route: "opengateway/deepseek/deepseek-v4.1-flash-ultrafast", reason: "not in the available model catalog" },
+        ],
         demoted: [`${SONNET}#medium`],
       })
       expect(JSON.stringify(trail)).not.toContain("find the fact")

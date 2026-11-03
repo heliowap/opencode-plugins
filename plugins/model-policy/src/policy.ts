@@ -33,11 +33,12 @@ interface Candidate {
 
 // The OpenAI route is the final fallback: it is not on the Claude account pool, so quota skips have somewhere to go.
 const SOL = { providerID: "cli_proxy_openai", model: "gpt-6.1-sol" }
+const DEVIN_SOL = { providerID: "cli_proxy_openai", model: "devin/gpt-6-1-sol" }
 
 const RESEARCH: readonly Candidate[] = [
+  { providerID: "opengateway", model: "deepseek/deepseek-v4.1-flash-ultrafast", effort: "medium" },
   { providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", effort: "medium" },
   { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "low" },
-  { ...SOL, effort: "medium" },
 ]
 
 // Research, explore, planner and implementer rules were approved directly by the user.
@@ -46,7 +47,7 @@ const POLICIES: Readonly<Record<string, readonly Candidate[]>> = {
   explore: RESEARCH,
   planner: [
     { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "high" },
-    { ...SOL, effort: "high" },
+    { ...DEVIN_SOL, effort: "high" },
   ],
   implementer: [
     { providerID: "cli_proxy", model: "cpa-claude-haiku-5-5", effort: "medium" },

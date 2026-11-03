@@ -19,8 +19,8 @@ it comes back.
 | Agent | Routes, in order |
 | --- | --- |
 | `implementer` | `cli_proxy/cpa-claude-haiku-5-5#medium` → `cli_proxy/cpa-claude-sonnet-5-5#medium` → `cli_proxy_openai/gpt-6.1-sol#medium` |
-| `researcher`, `explore` | `cli_proxy/cpa-claude-sonnet-5-5#medium` → `cli_proxy/cpa-claude-opus-5-5#low` → `cli_proxy_openai/gpt-6.1-sol#medium` |
-| `planner` | `cli_proxy/cpa-claude-opus-5-5#high` → `cli_proxy_openai/gpt-6.1-sol#high` |
+| `researcher`, `explore` | `opengateway/deepseek/deepseek-v4.1-flash-ultrafast#medium` → `cli_proxy/cpa-claude-sonnet-5-5#medium` → `cli_proxy/cpa-claude-opus-5-5#low` |
+| `planner` | `cli_proxy/cpa-claude-opus-5-5#high` → `cli_proxy_openai/devin/gpt-6-1-sol#high` |
 | `general`, `poteto-agent` | the parent's model (no policy) |
 
 Every other agent also keeps the model the parent chose. Routes are defined in
@@ -50,15 +50,15 @@ never recorded.
 ## Quota-aware routing
 
 Before it dispatches a policied agent, the plugin reads Claude quota and skips
-the Claude routes when the account pool is exhausted. The Sol route stays
-available, so the dispatch moves there.
+the Claude routes when the account pool is exhausted. The non-Claude routes
+(DeepSeek, Sol) stay available, so the dispatch moves there.
 
 - **Rule.** A Claude account is exhausted when less than 5% is left in its 5h or
   7d window. The pool is judged by the best enabled Claude account: it is
   exhausted only when every enabled account is. Accounts of other providers, and
   disabled accounts, are ignored.
-- **Scope.** Only Claude routes (`cli_proxy/cpa-claude-*`) are skipped. Sol is
-  never skipped for quota.
+- **Scope.** Only Claude routes (`cli_proxy/cpa-claude-*`) are skipped. DeepSeek
+  and Sol are never skipped for quota.
 - **Unknown quota.** Missing configuration, an unreachable proxy, an error or
   malformed response, or no enabled Claude account all count as not exhausted.
   Unknown quota never skips a route.

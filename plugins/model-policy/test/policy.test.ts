@@ -9,7 +9,14 @@ const PROXY_SOL: CatalogModel = { providerID: "cli_proxy_openai", id: "gpt-6.1-s
 const OPUS: CatalogModel = { providerID: "cli_proxy", id: "cpa-claude-opus-5-5", variants: EFFORTS }
 const SONNET: CatalogModel = { providerID: "cli_proxy", id: "cpa-claude-sonnet-5-5", variants: EFFORTS }
 const HAIKU: CatalogModel = { providerID: "cli_proxy", id: "cpa-claude-haiku-5-5", variants: EFFORTS }
-const FULL = [DIRECT, PROXY_SOL, OPUS, SONNET, HAIKU]
+const DEVIN_SOL: CatalogModel = { providerID: "cli_proxy_openai", id: "devin/gpt-6-1-sol", variants: EFFORTS }
+const DEEPSEEK: CatalogModel = {
+  providerID: "opengateway",
+  id: "deepseek/deepseek-v4.1-flash-ultrafast",
+  variants: ["low", "medium", "high"],
+}
+const FULL = [DIRECT, PROXY_SOL, DEVIN_SOL, DEEPSEEK, OPUS, SONNET, HAIKU]
+const DEEPSEEK_ROUTE = "opengateway/deepseek/deepseek-v4.1-flash-ultrafast"
 const HAIKU_ROUTE = "cli_proxy/cpa-claude-haiku-5-5"
 const SONNET_ROUTE = "cli_proxy/cpa-claude-sonnet-5-5"
 const OPUS_ROUTE = "cli_proxy/cpa-claude-opus-5-5"
@@ -105,37 +112,41 @@ describe("explore policy", () => {
 })
 
 describe("planner policy", () => {
-  test("a planner runs on Opus 5.5 at high effort, falling back to Sol at high effort", () => {
+  test("a planner runs on Opus 5.5 at high effort, falling back to Devin Sol at high effort", () => {
     expect(resolve("planner", FULL)).toEqual({
       routes: [
         { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", variant: "high" },
-        { providerID: "cli_proxy_openai", model: "gpt-6.1-sol", variant: "high" },
+        { providerID: "cli_proxy_openai", model: "devin/gpt-6-1-sol", variant: "high" },
       ],
       skipped: [],
     })
   })
 
-  test("an exhausted Opus 5.5 sends the planner to Sol at high effort", () => {
+  test("an exhausted Opus 5.5 sends the planner to Devin Sol at high effort", () => {
     expect(resolve("planner", FULL, { exhausted: new Set([OPUS_ROUTE]) })).toMatchObject({
-      routes: [{ providerID: "cli_proxy_openai", model: "gpt-6.1-sol", variant: "high" }],
+      routes: [{ providerID: "cli_proxy_openai", model: "devin/gpt-6-1-sol", variant: "high" }],
       skipped: [{ route: OPUS_ROUTE, reason: SKIP_REASON }],
     })
   })
 })
 
 describe("research policy", () => {
-  test("Sonnet 5.5 comes first, at medium effort", () => {
+  test("DeepSeek V4.1 Flash Ultrafast comes first, at medium effort", () => {
     const { routes } = resolve("researcher", FULL)
 
-    expect(routes[0]).toEqual({ providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", variant: "medium" })
+    expect(routes[0]).toEqual({
+      providerID: "opengateway",
+      model: "deepseek/deepseek-v4.1-flash-ultrafast",
+      variant: "medium",
+    })
   })
 
-  test("falls back to Opus 5.5 at low effort, then to Sol at medium effort", () => {
+  test("falls back to Sonnet 5.5 at medium effort, then to Opus 5.5 at low effort, with no Sol route", () => {
     expect(resolve("researcher", FULL)).toEqual({
       routes: [
+        { providerID: "opengateway", model: "deepseek/deepseek-v4.1-flash-ultrafast", variant: "medium" },
         { providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", variant: "medium" },
         { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", variant: "low" },
-        { providerID: "cli_proxy_openai", model: "gpt-6.1-sol", variant: "medium" },
       ],
       skipped: [],
     })
@@ -145,9 +156,9 @@ describe("research policy", () => {
     expect(resolve("researcher", [DIRECT])).toEqual({
       routes: [],
       skipped: [
+        { route: DEEPSEEK_ROUTE, reason: "not in the available model catalog" },
         { route: "cli_proxy/cpa-claude-sonnet-5-5", reason: "not in the available model catalog" },
         { route: "cli_proxy/cpa-claude-opus-5-5", reason: "not in the available model catalog" },
-        { route: "cli_proxy_openai/gpt-6.1-sol", reason: "not in the available model catalog" },
       ],
     })
   })
@@ -158,30 +169,34 @@ describe("research policy", () => {
     expect(resolve("researcher", [opusWithoutLow])).toEqual({
       routes: [],
       skipped: [
+        { route: DEEPSEEK_ROUTE, reason: "not in the available model catalog" },
         { route: "cli_proxy/cpa-claude-sonnet-5-5", reason: "not in the available model catalog" },
         { route: "cli_proxy/cpa-claude-opus-5-5", reason: "variant low is not available" },
-        { route: "cli_proxy_openai/gpt-6.1-sol", reason: "not in the available model catalog" },
       ],
     })
   })
 
-  test("a route that recently failed at the provider moves behind the healthy one", () => {
-    const resolution = resolve("researcher", FULL, { unhealthy: new Set(["cli_proxy/cpa-claude-sonnet-5-5"]) })
+  test("a route that recently failed at the provider moves behind the healthy ones", () => {
+    const resolution = resolve("researcher", FULL, { unhealthy: new Set([DEEPSEEK_ROUTE]) })
 
     expect(resolution).toMatchObject({
       routes: [
-        { model: "cpa-claude-opus-5-5", variant: "low" },
-        { model: "gpt-6.1-sol", variant: "medium" },
         { model: "cpa-claude-sonnet-5-5", variant: "medium" },
+        { model: "cpa-claude-opus-5-5", variant: "low" },
+        { model: "deepseek/deepseek-v4.1-flash-ultrafast", variant: "medium" },
       ],
     })
   })
 
   test("with every route failing, the declared order is kept", () => {
-    const all = new Set(["cli_proxy/cpa-claude-sonnet-5-5", "cli_proxy/cpa-claude-opus-5-5", SOL_ROUTE])
+    const all = new Set([DEEPSEEK_ROUTE, SONNET_ROUTE, OPUS_ROUTE])
 
     expect(resolve("researcher", FULL, { unhealthy: all })).toMatchObject({
-      routes: [{ model: "cpa-claude-sonnet-5-5" }, { model: "cpa-claude-opus-5-5" }, { model: "gpt-6.1-sol" }],
+      routes: [
+        { model: "deepseek/deepseek-v4.1-flash-ultrafast" },
+        { model: "cpa-claude-sonnet-5-5" },
+        { model: "cpa-claude-opus-5-5" },
+      ],
     })
   })
 })
