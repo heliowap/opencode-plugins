@@ -132,9 +132,16 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       await host.goal(session, "--tokens 50K show me in the bar")
       open(session)
 
-      await shows(running("120 / 50K"))
+      // Usage values are transient: the TUI may open after early steps have
+      // completed, so assert the count grows toward the budget, not exact values.
+      await shows(running(".+ / 50K"))
       await streamedGlyphs()
-      await shows(running("240 / 50K"))
+      const used = () => {
+        const match = /goal running · ([\d.]+)([KMG]?) \/ 50K/.exec(badgeLine())
+        return match ? Number(match[1]) * { "": 1, K: 1e3, M: 1e6, G: 1e9 }[match[2]!]! : -1
+      }
+      const first = used()
+      await waitFor(() => used() > first, "the badge usage never grew.")
       await host.goal(session, "pause")
       await shows("⏸ goal paused")
       await host.settle(session)
