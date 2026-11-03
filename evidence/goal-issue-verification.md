@@ -68,3 +68,7 @@ first failure. Twenty consecutive installed-package passes remain outstanding.
 T6 now waits for a running badge with any usage, rather than the transient
 value 120. A local host probe that delayed opening the TUI until at least 480
 tokens passed; it does not replace the required installed-package runs.
+
+At `bb4edeb983832c47f40d74175b7ce9c36997b380`, the installed-package command
+above passed 20 consecutive runs with OpenCode 2.2.5 and Bun 1.4.3 on macOS:
+20 passed, 0 failed, in 686.71 seconds.
