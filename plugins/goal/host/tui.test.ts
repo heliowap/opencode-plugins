@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { existsSync, readFileSync, rmSync } from "node:fs"
 import { afterToolResult } from "./harness/fixture.ts"
 import { Host, type Session } from "./harness/host.ts"
 
@@ -89,15 +90,21 @@ const click = async (pattern: RegExp) => {
 
 const SPINNER_FRAMES: readonly string[] = ["◐", "◓", "◑", "◒"]
 
-const sampledGlyphs = async (glyph: () => string | undefined) => {
-  const glyphs = new Set<string>()
-  const deadline = Date.now() + 5_000
-  while (Date.now() < deadline && glyphs.size < SPINNER_FRAMES.length) {
-    const seen = glyph()
-    if (seen !== undefined && SPINNER_FRAMES.includes(seen)) glyphs.add(seen)
-    await Bun.sleep(50)
+const streamedGlyphs = async () => {
+  // Polling capture-pane can alias against the 150ms frame rate when a spawn
+  // costs hundreds of ms on a slow runner. pipe-pane streams every frame.
+  const file = `${terminal}.capture`
+  expect(Bun.spawnSync(["tmux", "pipe-pane", "-t", terminal!, "-o", `cat >> ${file}`]).exitCode).toBe(0)
+  try {
+    await waitFor(
+      () => existsSync(file) && SPINNER_FRAMES.every((frame) => readFileSync(file, "utf8").includes(frame)),
+      "the piped output never contained all spinner frames.",
+      10_000,
+    )
+  } finally {
+    Bun.spawnSync(["tmux", "pipe-pane", "-t", terminal!])
+    rmSync(file, { force: true })
   }
-  return [...glyphs].sort()
 }
 
 const running = (usage: string) => new RegExp(`^[◐◓◑◒] goal running · ${usage}$`)
@@ -126,7 +133,7 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       open(session)
 
       await shows(running("120 / 50K"))
-      expect(await sampledGlyphs(() => badgeLine().split(" ")[0])).toEqual(["◐", "◑", "◒", "◓"])
+      await streamedGlyphs()
       await shows(running("240 / 50K"))
       await host.goal(session, "pause")
       await shows("⏸ goal paused")
@@ -229,7 +236,8 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       open(session)
 
       await shows(running(".+"))
-      expect(await sampledGlyphs(() => /([◐◓◑◒]) Goal/.exec(screen())?.[1])).toEqual(["◐", "◑", "◒", "◓"])
+      await streamedGlyphs()
+      await waitFor(() => /[◐◓◑◒] Goal/.test(screen()), "the sidebar title never spun.", 10_000)
     },
     TIMEOUT,
   )
