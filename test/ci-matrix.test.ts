@@ -109,6 +109,13 @@ describe("ci-matrix", () => {
     expect(by["protect-agents-md"]).toMatchObject({ runner: "macos-latest", opencode: "2.0.32", bun: "1.4.3" })
   })
 
+  test("model-policy runs its host suite against an installed OpenCode", async () => {
+    const r = await run([], "plugins/model-policy/src/background.ts\n")
+    expect(r.rows).toEqual([
+      { name: "model-policy", runner: "ubuntu-latest", bun: "1.4.3", opencode: "2.2.5", test: "bun run test && bun run test:host" },
+    ])
+  })
+
   test("emits goal_runtime and goal_mutation outputs", async () => {
     const outputs = async (stdin: string, args: string[] = []) => {
       const proc = Bun.spawn(["bun", script, ...args], { stdin: new Response(stdin), stdout: "pipe", stderr: "pipe" })

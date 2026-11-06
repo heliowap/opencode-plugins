@@ -194,7 +194,8 @@ bun test ./host     # starts real `opencode serve` instances against fixture pro
 ```
 
 The host tests need the `opencode` binary on `PATH` (or `OPENCODE_BIN`). They
-were written against OpenCode 2.0.25 and pass on 2.2.0. Tests that load the
+were written against OpenCode 2.0.25 and pass on 2.2.0; CI runs them on 2.2.5
+whenever this plugin's runtime files change. Tests that load the
 `code-review` skill are skipped when that file is missing. The host harness
 clears `CLIPROXY_URL` and `CLIPROXY_MANAGEMENT_KEY`, so the tests never reach
 your real proxy.
