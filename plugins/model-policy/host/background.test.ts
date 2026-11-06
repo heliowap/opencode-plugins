@@ -3,7 +3,7 @@ import { run, stopRuns, text, toolResults, type Call, type ChatRequest, type Rep
 
 const TIMEOUT = 120_000
 const CHILD_PROMPT = "child task"
-const GRANDCHILD_PROMPT = "grandchild task"
+const GRANDCHILD_PROMPT = "nested task"
 // OpenCode refuses a subagent call from a child session at the default depth of 1.
 const NESTED = { experimental: { subagent_depth: 2 } }
 
@@ -47,6 +47,8 @@ describe("background in child sessions", () => {
       const child = calls.filter((call) => promptedWith(call.request, CHILD_PROMPT))
       const parent = calls.filter(isParent)
 
+      // Shell, nested subagent, final answer: a background call would add a resumed turn.
+      expect(child).toHaveLength(3)
       expect(optionsOf(child[0]!.request, "shell")).toEqual(["command", "workdir", "timeout"])
       expect(optionsOf(child[0]!.request, "subagent")).toEqual(["agent", "description", "prompt", "model", "sessionID"])
       expect(optionsOf(parent[0]!.request, "shell")).toEqual(["command", "workdir", "timeout", "background"])

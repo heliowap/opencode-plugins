@@ -4,14 +4,14 @@ type Tools = SessionContext["tools"]
 type Schema = Tools[string]["input"]
 
 interface Session {
-  readonly parentID?: string
+  readonly parentID?: string | null
 }
 
 // A background call returns at once and tells the model to end its response. In a child session
 // that response is the final report, so the parent gets it while the work is still running.
 const BACKGROUND_TOOLS: ReadonlySet<string> = new Set(["shell", "subagent"])
 
-const isChild = (session: Session) => session.parentID !== undefined
+const isChild = (session: Session) => Boolean(session.parentID)
 
 const withoutBackground = (schema: Schema): Schema => {
   if (typeof schema.properties !== "object" || schema.properties === null) return schema
@@ -29,5 +29,8 @@ export const toolsFor = (session: Session, tools: Tools): Tools => {
 export const requestsBackground = (tool: string, input: unknown): input is { readonly background: true } =>
   BACKGROUND_TOOLS.has(tool) && typeof input === "object" && input !== null && (input as { background?: unknown }).background === true
 
-export const inputFor = <Input extends object>(session: Session, input: Input): Input =>
-  isChild(session) ? { ...input, background: false } : input
+export const inputFor = <Input extends { readonly background?: unknown }>(session: Session, input: Input): Input | Omit<Input, "background"> => {
+  if (!isChild(session)) return input
+  const { background: _, ...foreground } = input
+  return foreground
+}
