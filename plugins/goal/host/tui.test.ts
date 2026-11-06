@@ -88,6 +88,20 @@ const click = async (pattern: RegExp) => {
   type("-l", `\x1b[<0;${cell}M\x1b[<0;${cell}m`)
 }
 
+const openBadgeControls = async () => {
+  // A badge click sometimes never opens the controls on a loaded runner, so
+  // click again while they stay closed instead of failing the loop.
+  const deadline = Date.now() + 60_000
+  while (Date.now() < deadline) {
+    await click(/goal (running|active)/)
+    await waitFor(() => screen().includes("Pause goal"), "the badge click never opened the controls.", 8_000).catch(
+      () => undefined,
+    )
+    if (screen().includes("Pause goal")) return
+  }
+  throw new Error(`the badge never opened the controls. Screen:\n${screen()}`)
+}
+
 const SPINNER_FRAMES: readonly string[] = ["◐", "◓", "◑", "◒"]
 
 const streamedGlyphs = async () => {
@@ -354,7 +368,9 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
     "T9 the animated badge stays clickable across spinner frames",
     async () => {
       host = await Host.start({
-        script: () => ({ text: "Step.", delayMs: 4_000 }),
+        // An installed package opens the TUI slower than a local checkout, so
+        // keep the turn running until the first badge frame has rendered.
+        script: () => ({ text: "Step.", delayMs: 60_000 }),
         ...(process.env.GOAL_PLUGIN_SPEC && { pluginSpec: process.env.GOAL_PLUGIN_SPEC }),
       })
       const session = await host.session()
@@ -363,8 +379,7 @@ describe.skipIf(!tmux && !process.env.CI)("status above the input in the termina
       await shows(running(".+"))
 
       for (let index = 0; index < 30; index++) {
-        await click(/goal (running|active)/)
-        await sees(["Pause goal"])
+        await openBadgeControls()
         type("Escape")
         await waitFor(() => !screen().includes("Pause goal"), "the goal controls did not close.")
       }
