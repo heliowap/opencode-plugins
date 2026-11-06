@@ -1,8 +1,9 @@
 # opencode-v2-model-policy
 
 OpenCode 2 plugin that enforces which model a subagent runs on, per agent, with
-provider fallback. It also filters the model catalog and keeps Anthropic API
-models user-only.
+provider fallback. It also filters the model catalog, keeps Anthropic API
+models user-only, and makes subagents wait for their own shell commands and
+subagents instead of running them in the background.
 
 Absorbs the former heliowap/opencode-v2-model-routes.
 
@@ -128,6 +129,25 @@ API model are not enforced either.
 This plugin replaces model-routes: remove the model-routes entry from `plugins`
 when you install it.
 
+## No background work in child sessions
+
+A background `shell` or `subagent` call returns at once and tells the model to
+end its response and wait to be resumed. In a child session, ending the response
+delivers the final report to the parent, so the dispatch completes while the
+work it started is still running.
+
+In a session that has a parent:
+
+- a `context` hook removes the `background` option from the `shell` and
+  `subagent` input schemas the model sees;
+- an `execute.before` hook turns a `shell` or `subagent` call that still sends
+  `background: true` into a foreground call, so the subagent waits for the
+  result in its own turn.
+
+Top-level sessions keep `background` unchanged. A subagent can still run
+commands in parallel within one call (`cmd1 & cmd2 & wait`). The tool
+descriptions still mention background mode; only the option is gone.
+
 ## Coverage
 
 The plugin intercepts `subagent` via `execute.before`. Commands with
@@ -167,7 +187,7 @@ opencode api get /api/plugin
 ## Development
 
 ```sh
-bun test            # policy, failure classification and quota unit tests
+bun test            # policy, failure classification, quota and background unit tests
 bun run typecheck
 bun test ./host     # starts real `opencode serve` instances against fixture providers
 ```
