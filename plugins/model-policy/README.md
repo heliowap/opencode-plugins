@@ -19,7 +19,7 @@ it comes back.
 | Agent | Routes, in order |
 | --- | --- |
 | `implementer` | `cli_proxy/cpa-claude-haiku-5-5#medium` → `cli_proxy/cpa-claude-sonnet-5-5#medium` → `cli_proxy_openai/gpt-6.1-sol#medium` |
-| `researcher`, `explore` | `opengateway/deepseek/deepseek-v4.1-flash-ultrafast#medium` → `cli_proxy/cpa-claude-sonnet-5-5#medium` → `cli_proxy/cpa-claude-opus-5-5#low` |
+| `researcher`, `explore` | `cli_proxy/devin/deepseek-v4-1-flash-1017#max` → `cli_proxy/cpa-claude-sonnet-5-5#medium` → `cli_proxy/cpa-claude-opus-5-5#low` |
 | `planner` | `cli_proxy/cpa-claude-opus-5-5#high` → `cli_proxy_openai/devin/gpt-6-1-sol#high` |
 | `general`, `poteto-agent` | the parent's model (no policy) |
 

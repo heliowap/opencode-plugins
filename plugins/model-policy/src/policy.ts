@@ -36,7 +36,7 @@ const SOL = { providerID: "cli_proxy_openai", model: "gpt-6.1-sol" }
 const DEVIN_SOL = { providerID: "cli_proxy_openai", model: "devin/gpt-6-1-sol" }
 
 const RESEARCH: readonly Candidate[] = [
-  { providerID: "opengateway", model: "deepseek/deepseek-v4.1-flash-ultrafast", effort: "medium" },
+  { providerID: "cli_proxy", model: "devin/deepseek-v4-1-flash-1017", effort: "max" },
   { providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", effort: "medium" },
   { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", effort: "low" },
 ]

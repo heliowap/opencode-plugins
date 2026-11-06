@@ -11,12 +11,12 @@ const SONNET: CatalogModel = { providerID: "cli_proxy", id: "cpa-claude-sonnet-5
 const HAIKU: CatalogModel = { providerID: "cli_proxy", id: "cpa-claude-haiku-5-5", variants: EFFORTS }
 const DEVIN_SOL: CatalogModel = { providerID: "cli_proxy_openai", id: "devin/gpt-6-1-sol", variants: EFFORTS }
 const DEEPSEEK: CatalogModel = {
-  providerID: "opengateway",
-  id: "deepseek/deepseek-v4.1-flash-ultrafast",
-  variants: ["low", "medium", "high"],
+  providerID: "cli_proxy",
+  id: "devin/deepseek-v4-1-flash-1017",
+  variants: ["none", "low", "high", "max"],
 }
 const FULL = [DIRECT, PROXY_SOL, DEVIN_SOL, DEEPSEEK, OPUS, SONNET, HAIKU]
-const DEEPSEEK_ROUTE = "opengateway/deepseek/deepseek-v4.1-flash-ultrafast"
+const DEEPSEEK_ROUTE = "cli_proxy/devin/deepseek-v4-1-flash-1017"
 const HAIKU_ROUTE = "cli_proxy/cpa-claude-haiku-5-5"
 const SONNET_ROUTE = "cli_proxy/cpa-claude-sonnet-5-5"
 const OPUS_ROUTE = "cli_proxy/cpa-claude-opus-5-5"
@@ -131,20 +131,20 @@ describe("planner policy", () => {
 })
 
 describe("research policy", () => {
-  test("DeepSeek V4.1 Flash Ultrafast comes first, at medium effort", () => {
+  test("Devin DeepSeek V4.1 Flash comes first, at max effort", () => {
     const { routes } = resolve("researcher", FULL)
 
     expect(routes[0]).toEqual({
-      providerID: "opengateway",
-      model: "deepseek/deepseek-v4.1-flash-ultrafast",
-      variant: "medium",
+      providerID: "cli_proxy",
+      model: "devin/deepseek-v4-1-flash-1017",
+      variant: "max",
     })
   })
 
   test("falls back to Sonnet 5.5 at medium effort, then to Opus 5.5 at low effort, with no Sol route", () => {
     expect(resolve("researcher", FULL)).toEqual({
       routes: [
-        { providerID: "opengateway", model: "deepseek/deepseek-v4.1-flash-ultrafast", variant: "medium" },
+        { providerID: "cli_proxy", model: "devin/deepseek-v4-1-flash-1017", variant: "max" },
         { providerID: "cli_proxy", model: "cpa-claude-sonnet-5-5", variant: "medium" },
         { providerID: "cli_proxy", model: "cpa-claude-opus-5-5", variant: "low" },
       ],
@@ -183,7 +183,7 @@ describe("research policy", () => {
       routes: [
         { model: "cpa-claude-sonnet-5-5", variant: "medium" },
         { model: "cpa-claude-opus-5-5", variant: "low" },
-        { model: "deepseek/deepseek-v4.1-flash-ultrafast", variant: "medium" },
+        { model: "devin/deepseek-v4-1-flash-1017", variant: "max" },
       ],
     })
   })
@@ -193,7 +193,7 @@ describe("research policy", () => {
 
     expect(resolve("researcher", FULL, { unhealthy: all })).toMatchObject({
       routes: [
-        { model: "deepseek/deepseek-v4.1-flash-ultrafast" },
+        { model: "devin/deepseek-v4-1-flash-1017" },
         { model: "cpa-claude-sonnet-5-5" },
         { model: "cpa-claude-opus-5-5" },
       ],

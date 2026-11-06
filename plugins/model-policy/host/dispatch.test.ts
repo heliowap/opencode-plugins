@@ -76,7 +76,7 @@ describe("research dispatch", () => {
         agent: "researcher",
         route: `${OPUS}#low`,
         skipped: [
-          { route: "opengateway/deepseek/deepseek-v4.1-flash-ultrafast", reason: "not in the available model catalog" },
+          { route: "cli_proxy/devin/deepseek-v4-1-flash-1017", reason: "not in the available model catalog" },
         ],
         demoted: [`${SONNET}#medium`],
       })
