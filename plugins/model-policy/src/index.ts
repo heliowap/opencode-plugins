@@ -79,7 +79,8 @@ export default Plugin.define({
       if (classification.skipSameRouteRetries && hasFallback) event.decision = { retry: false }
     })
 
-    const session = (sessionID: string) => ctx.session.get({ sessionID })
+    // A failed lookup treats the session as top-level: it keeps background instead of failing the request.
+    const session = (sessionID: string) => ctx.session.get({ sessionID }).catch(() => ({}))
 
     await ctx.session.hook("context", async (event) => {
       event.tools = toolsFor(await session(event.sessionID), event.tools)

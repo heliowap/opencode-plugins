@@ -144,7 +144,8 @@ In a session that has a parent:
   `background: true` into a foreground call, so the subagent waits for the
   result in its own turn.
 
-Top-level sessions keep `background` unchanged. A subagent can still run
+Top-level sessions keep `background` unchanged, and so does a session whose
+lookup fails, so a lookup error never fails the request. A subagent can still run
 commands in parallel within one call (`cmd1 & cmd2 & wait`). The tool
 descriptions still mention background mode; only the option is gone.
 

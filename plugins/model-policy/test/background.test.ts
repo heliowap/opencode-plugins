@@ -41,10 +41,14 @@ test("a background call from a child session runs in the foreground with its oth
   expect(inputFor(CHILD, { command: "bun test", workdir: "/repo", background: true })).toEqual({
     command: "bun test",
     workdir: "/repo",
-    background: false,
   })
 })
 
 test("a background call from a top-level session stays in the background", () => {
   expect(inputFor(TOP, { command: "bun test", background: true })).toEqual({ command: "bun test", background: true })
+})
+
+test("a session whose parentID is null counts as top-level", () => {
+  expect(inputFor({ parentID: null }, { command: "bun test", background: true })).toEqual({ command: "bun test", background: true })
+  expect(inputFor(CHILD, { command: "bun test", background: true })).toEqual({ command: "bun test" })
 })
