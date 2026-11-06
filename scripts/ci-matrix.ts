@@ -7,6 +7,8 @@ export const OVERRIDES: Record<string, Partial<Omit<Row, "name">>> = {
   goal: { bun: "1.4.0", test: "bun test --coverage" },
   "cliproxy-quota": { bun: "1.4.0", test: "bun test && bun script/check-tests.ts" },
   "protect-agents-md": { runner: "macos-latest", opencode: "2.0.32" },
+  // The host suite proves the hook wiring that unit tests cannot see; 2.2.5 is the version it was verified on.
+  "model-policy": { opencode: "2.2.5", test: "bun run test && bun run test:host" },
 }
 
 const root = join(import.meta.dir, "..")

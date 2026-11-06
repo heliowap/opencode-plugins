@@ -8,7 +8,7 @@
 | `bun run check:all` | the same for everything | you want the whole repo at once |
 | `bun run lint:repo` | the repo linter | its rules are in `CODING_STANDARDS.md` |
 
-`bun install` enables the pre-commit hook in `.githooks/` (`prepare`). CI is `.github/workflows/ci.yml`: a per-plugin matrix selected by changed files through `scripts/ci-matrix.ts`; goal's host suites run only on goal runtime changes. The scripts live in `package.json`, `scripts/check.ts`, and `scripts/lint-repo.ts`.
+`bun install` enables the pre-commit hook in `.githooks/` (`prepare`). CI is `.github/workflows/ci.yml`: a per-plugin matrix selected by changed files through `scripts/ci-matrix.ts`; goal's host suites run only on goal runtime changes, and model-policy's host suite runs in its matrix row (`OVERRIDES`). The scripts live in `package.json`, `scripts/check.ts`, and `scripts/lint-repo.ts`.
 
 ## Add a plugin
 
