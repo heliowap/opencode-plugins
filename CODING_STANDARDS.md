@@ -19,7 +19,7 @@ These rules apply to every plugin under `plugins/` and to the root code (`instal
 - Rules live in pure modules under `src/`: no I/O, and the clock enters as a `now` argument.
 - I/O sits at one edge per concern (a git module, an HTTP client, the OpenCode event adapter). Adapters (`index.ts`, `tui.tsx`) translate host events into calls to the pure modules and carry no rules.
 - A session is a child when its `parentID` is truthy, as in `base-check`, `unpushed-work` and `model-policy`.
-- A lookup that only adjusts a hook's behavior (such as `ctx.session.get` inside a hook) fails open: a failed lookup skips the adjustment instead of failing the request, as in `base-check` and `model-policy`. Say so in a comment at the lookup.
+- A lookup that only adjusts a hook's behavior (such as `ctx.session.get` inside a hook) fails open: a failed lookup skips the adjustment instead of failing the request, as in `model-policy`. Say so in a comment at the lookup.
 
 ## Style
 
