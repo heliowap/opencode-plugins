@@ -1,5 +1,6 @@
 import { Plugin } from "@opencode/plugin"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
+import { inputFor, requestsBackground, toolsFor } from "./background.ts"
 import { classify } from "./failure.ts"
 import { isPolicied, QUOTA_SKIP_REASON, resolve, type Route, type Skip } from "./policy.ts"
 import { exhaustedRoutes } from "./quota.ts"
@@ -78,7 +79,15 @@ export default Plugin.define({
       if (classification.skipSameRouteRetries && hasFallback) event.decision = { retry: false }
     })
 
+    const session = (sessionID: string) => ctx.session.get({ sessionID })
+
+    await ctx.session.hook("context", async (event) => {
+      event.tools = toolsFor(await session(event.sessionID), event.tools)
+    })
+
     await ctx.tool.hook("execute.before", async (event) => {
+      // Hiding the option from the schema does not stop a model from sending it.
+      if (requestsBackground(event.tool, event.input)) event.input = inputFor(await session(event.sessionID), event.input)
       if (event.tool !== "subagent") return
       const input = event.input
       if (!isSubagentInput(input)) return rejectUserOnly(input)

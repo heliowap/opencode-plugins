@@ -19,6 +19,7 @@ export interface HostOptions {
   readonly omit?: readonly string[]
   readonly extraPlugins?: readonly string[]
   readonly catalog?: Readonly<Record<string, Readonly<Record<string, string | undefined>>>>
+  readonly config?: Readonly<Record<string, unknown>>
   readonly configFiles?: Readonly<Record<string, string>>
   readonly projectFiles?: Readonly<Record<string, string>>
   readonly env?: Record<string, string>
@@ -99,6 +100,7 @@ export class Host {
           planner: { mode: "subagent", description: "Fixture planner", model: `${OPUS}#medium` },
         },
         permissions: [{ action: "*", resource: "*", effect: "allow" }, ...(options.permissions?.(config) ?? [])],
+        ...options.config,
       }),
     )
     await symlink(options.pluginDir ?? join(REPO, "src"), join(config, "plugins", "model-policy"))
