@@ -277,8 +277,12 @@ export function nativeError(message: string): Record<NativeID, QuotaResult> {
   return Object.fromEntries(Object.keys(NATIVE_SOURCES).map((id) => [id, { ok: false as const, error: message }])) as Record<NativeID, QuotaResult>
 }
 
-export function providerForModel(modelID: string) {
+export type ModelProviders = Readonly<Record<string, string>>
+
+export function providerForModel(modelID: string, overrides: ModelProviders = {}) {
   const id = modelID.toLowerCase().replace(/^cpa-/, "")
+  const override = Object.entries(overrides).find((entry) => id.startsWith(entry[0].toLowerCase()))
+  if (override) return override[1]
   const prefix = id.split("/")[0]
   if (id.includes("/") && prefix && prefix in READERS) return prefix
   return MODEL_PROVIDERS.find((entry) => entry[0].test(id))?.[1]
@@ -312,14 +316,15 @@ export function quotaView(
   modelID: string | undefined,
   proxy: { readonly accounts: readonly Account[]; readonly error: string | undefined },
   native: Readonly<Partial<Record<NativeID, QuotaResult>>>,
+  overrides: ModelProviders = {},
 ): { provider: string | undefined; accounts: readonly Account[]; windows: readonly Window[]; error: string | undefined } {
   if (source === undefined) return { provider: undefined, accounts: [], windows: [], error: proxy.error }
   if (source === "proxy") {
-    const provider = modelID ? providerForModel(modelID) : undefined
+    const provider = modelID ? providerForModel(modelID, overrides) : undefined
     return {
       provider,
       accounts: provider ? proxy.accounts.filter((account) => account.provider === provider) : [],
-      windows: modelID ? windowsForModel(proxy.accounts, modelID) : [],
+      windows: modelID ? windowsForModel(proxy.accounts, modelID, overrides) : [],
       error: proxy.error,
     }
   }
@@ -341,8 +346,8 @@ export function summarize(accounts: readonly Account[], provider: string) {
   })
 }
 
-export function windowsForModel(accounts: readonly Account[], modelID: string) {
-  const provider = providerForModel(modelID)
+export function windowsForModel(accounts: readonly Account[], modelID: string, overrides: ModelProviders = {}) {
+  const provider = providerForModel(modelID, overrides)
   if (!provider) return []
   const fable = modelID.toLowerCase().includes("fable")
   return summarize(accounts, provider).filter((item) => fable || item.kind !== "fable")

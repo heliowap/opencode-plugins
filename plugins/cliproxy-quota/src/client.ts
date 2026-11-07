@@ -99,6 +99,10 @@ export function resolveSettings(
     providers: Array.isArray(options.providers)
       ? options.providers.filter((item): item is string => typeof item === "string")
       : [],
+    modelProviders:
+      typeof options.modelProviders === "object" && options.modelProviders !== null && !Array.isArray(options.modelProviders)
+        ? Object.fromEntries(Object.entries(options.modelProviders).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+        : {},
   }
 }
 

@@ -208,6 +208,21 @@ describe("providerForModel", () => {
   })
 })
 
+describe("providerForModel with model provider overrides", () => {
+  const overrides = { "devin/gpt-": "codex" }
+
+  test("maps a model ID that starts with a configured prefix to the configured provider", () => {
+    expect(providerForModel("devin/gpt-6-1-sol", overrides)).toBe("codex")
+    expect(providerForModel("DEVIN/GPT-6-Astra", overrides)).toBe("codex")
+    expect(providerForModel("devin/gpt-6-1-sol")).toBe("devin")
+  })
+
+  test("leaves model IDs outside the configured prefixes on the built-in rules", () => {
+    expect(providerForModel("devin/swe-2", overrides)).toBe("devin")
+    expect(providerForModel("claude-sonnet-5", overrides)).toBe("claude")
+  })
+})
+
 describe("providerForModel for Antigravity", () => {
   test("maps Gemini models to the Antigravity Gemini group", () => {
     expect(providerForModel("gemini-3.8-flash")).toBe("antigravity")
@@ -417,6 +432,17 @@ describe("quotaView", () => {
     })
     expect(quotaView("proxy", "gpt-6.1-sol", empty, {}).accounts).toEqual([codexAccount])
     expect(quotaView("proxy", "cpa-claude-opus-5-5", empty, {}).windows).toEqual([{ kind: "5h", usedPercent: 34, resetAt: undefined }])
+  })
+
+  test("shows the provider a model provider override assigns to the selected model", () => {
+    const empty = { accounts: [codexAccount, claudeAccount], error: undefined }
+    expect(quotaView("proxy", "devin/gpt-6-1-sol", empty, {}, { "devin/gpt-": "codex" })).toEqual({
+      provider: "codex",
+      accounts: [codexAccount],
+      windows: [{ kind: "5h", usedPercent: 50, resetAt: undefined }],
+      error: undefined,
+    })
+    expect(quotaView("proxy", "devin/gpt-6-1-sol", empty, {}).provider).toBe("devin")
   })
 
   test("shows the native provider and its summarized windows once it reports accounts", () => {

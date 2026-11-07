@@ -73,12 +73,15 @@ The plugin reads these settings, in order: plugin options, then environment vari
 | `managementKey` | `CLIPROXY_MANAGEMENT_KEY` | none | Management key. Required. |
 | `intervalSeconds` | none | `60` | Refresh interval. The minimum is 10. |
 | `providers` | none | `[]` | OpenCode provider IDs to treat as CLIProxyAPI. |
+| `modelProviders` | none | `{}` | Model ID prefixes mapped to the proxy provider whose quota they use. |
 
 The plugin also refreshes after every finished turn.
 
-You usually do not need `providers`. The plugin treats any OpenCode provider whose `settings.baseURL` points at the same host and port as `baseURL` as CLIProxyAPI. List provider IDs only when the proxy sits behind another address.
+You usually do not need `providers`. The plugin treats any OpenCode provider whose `settings.baseURL` points at the same host and port as `baseURL` as CLIProxyAPI. List provider IDs only when the proxy sits behind another address, or to show proxy quota instead of native quota for a provider such as `openai`.
 
-Pass options with the object form in `opencode.jsonc`. Prefer the environment variable for the key so it stays out of the config file.
+`modelProviders` overrides the [model ID rules](#how-it-works) for proxy models. For example, `{ "devin/gpt-": "codex" }` shows Codex quota instead of Devin quota for GPT models served through Devin. The value is a provider from the rules table: `codex`, `claude`, `devin`, `antigravity`, or `antigravity-3p`.
+
+Pass options with the object form in `~/.config/opencode/cli.json`. The terminal UI does not receive options set in `opencode.jsonc`. Prefer the environment variable for the key so it stays out of the config file.
 
 ```jsonc
 {
@@ -103,7 +106,7 @@ The plugin also reads the `quota.signals` that CLIProxyAPI recorded from the Cla
 
 If a request fails, the plugin keeps the last answer it got for that account, Fable included. It shows only the recorded signals until the first answer arrives. A window whose reset time has passed counts as renewed.
 
-To pick the provider for the selected model, the plugin strips a `cpa-` prefix from the model ID and matches the rest in this order:
+To pick the provider for the selected model, the plugin strips a `cpa-` prefix from the model ID and lowercases it. A `modelProviders` prefix wins first, in the order listed. Otherwise the rest matches in this order:
 
 | Model ID | Provider |
 | --- | --- |

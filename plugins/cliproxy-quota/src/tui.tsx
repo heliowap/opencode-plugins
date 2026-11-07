@@ -46,7 +46,7 @@ export default Plugin.define({
       return quotaSource(info ?? { id: model.providerID }, settings)
     })
     const view = createMemo(() =>
-      quotaView(source(), context.ui.model.current()?.modelID, { accounts: proxyAccounts(), error: proxyError() }, native()),
+      quotaView(source(), context.ui.model.current()?.modelID, { accounts: proxyAccounts(), error: proxyError() }, native(), settings.modelProviders),
     )
 
     context.ui.slot({

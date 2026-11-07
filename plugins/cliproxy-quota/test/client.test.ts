@@ -347,4 +347,9 @@ describe("resolveSettings", () => {
   test("keeps only the string provider IDs", () => {
     expect(resolveSettings({ providers: ["proxy", 3, "cpa"] }, {}).providers).toEqual(["proxy", "cpa"])
   })
+
+  test("keeps only the model provider overrides whose provider is a string", () => {
+    expect(resolveSettings({ modelProviders: { "devin/gpt-": "codex", "x-": 3 } }, {}).modelProviders).toEqual({ "devin/gpt-": "codex" })
+    expect(resolveSettings({ modelProviders: ["codex"] }, {}).modelProviders).toEqual({})
+  })
 })
