@@ -9,6 +9,8 @@ export const OVERRIDES: Record<string, Partial<Omit<Row, "name">>> = {
   "protect-agents-md": { runner: "macos-latest", opencode: "2.0.32" },
   // The host suite proves the hook wiring that unit tests cannot see; 2.2.5 is the version it was verified on.
   "model-policy": { opencode: "2.2.5", test: "bun run test && bun run test:host" },
+  // Its host tests run inside `bun run test`; 2.2.7 is the version they were verified on.
+  "cold-read": { opencode: "2.2.7" },
 }
 
 const root = join(import.meta.dir, "..")

@@ -27,6 +27,7 @@ Host suites start a real `opencode serve` against a fixture provider, so `openco
 - goal: `plugins/goal/README.md`, section Develop. Not in the README: `GOAL_HOST_KEEP=1` keeps each host's temp directory, and `GOAL_PLUGIN_SPEC=<spec>` makes the `package` and `tui` suites install that spec instead of loading `src/`.
 - model-policy: `plugins/model-policy/README.md`, section Development (`bun run test:host`).
 - protect-agents-md: `plugins/protect-agents-md/README.md`, section Development.
+- cold-read: `plugins/cold-read/README.md`, section Development.
 
 ## Prove an install in isolation
 
