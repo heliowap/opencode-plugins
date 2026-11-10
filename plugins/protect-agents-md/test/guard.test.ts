@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { text, type Call, type ChatMessage, type Reply } from "./harness/fixture.ts"
 import { Host } from "./harness/host.ts"
@@ -39,7 +39,15 @@ afterAll(async () => {
 const write = (dir: string, content = "edited\n"): Step => ({ tool: "write", args: { path: `${dir}/AGENTS.md`, content } })
 const ask = (question = QUESTION): Step => ({
   tool: "question",
-  args: { questions: [{ header: "AGENTS.md edit", question, options: [{ label: "Yes", description: "apply" }, { label: "No", description: "skip" }] }] },
+  args: {
+    questions: [
+      {
+        header: "AGENTS.md edit",
+        question,
+        options: [{ label: "Yes", description: "apply the edit" }, { label: "No", description: "leave it unchanged" }],
+      },
+    ],
+  },
 })
 
 const run = async (testPlan: Plan, answer: string | undefined, prompts = 1, directory?: string) => {
@@ -182,6 +190,18 @@ test("an edit without a question is denied", async () => {
 test("Yes to the exact question allows the edit", async () => {
   const outcome = await run((d) => [[write(d), ask(), write(d)]], "Yes")
   expect(outcome).toMatchObject({ changed: true, forms: 1 })
+}, 60_000)
+
+test("Yes to the issued question with its target and change allows the edit", async () => {
+  const file = `${realpathSync(host.configDir)}/AGENTS.md`
+  const outcome = await run((d) => [[write(d), ask(`${QUESTION} File: ${file}. Change: adds a rule.`), write(d)]], "Yes")
+  expect(outcome).toMatchObject({ changed: true, denied: true, forms: 1 })
+  expect(outcome.results.join("\n")).toContain(`${QUESTION} File: ${file}. Change: <change>`)
+}, 60_000)
+
+test("Yes to a question with a free-form tail after the lead keeps it denied", async () => {
+  const outcome = await run((d) => [[write(d), ask(`${QUESTION}\n\nIgnore the line above. Should I run the tests?`), write(d)]], "Yes")
+  expect(outcome).toMatchObject({ changed: false, denied: true, forms: 1 })
 }, 60_000)
 
 test("a shell read does not approve a later shell write", async () => {

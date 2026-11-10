@@ -50,16 +50,30 @@ There is no automatic approval based on an agent's answer.
 
   The denial message tells the agent to ask you first.
 - **Approval.** The denial message tells the agent to call the question tool
-  with a ready-made input:
+  with a ready-made input that names the target (the file it resolves to,
+  or the shell command, whose head and tail are kept when it exceeds 300
+  characters) and a `<change>` slot the agent fills with what the edit
+  changes and why:
 
   ```text
-  Stop and call the question tool with exactly this input, then retry only if the answer is "Yes":
-  {"questions":[{"header":"AGENTS.md edit","question":"Do you want to proceed with editing AGENTS.md?","options":[{"label":"Yes","description":"apply the edit"},{"label":"No","description":"leave it unchanged"}]}]}
-  If you cannot use the question tool, report this to your parent.
+  Stop and call the question tool with this input, replacing <change> with what the edit changes and why, then retry only if the answer is "Yes":
+  {"questions":[{"header":"AGENTS.md edit","question":"Do you want to proceed with editing AGENTS.md? File: /path/to/AGENTS.md. Change: <change>","options":[{"label":"Yes","description":"apply the edit"},{"label":"No","description":"leave it unchanged"}]}]}
+  Keep the question's first sentence and target as written. If you cannot use the question tool, report this to your parent.
   ```
 
-  Only the answer `Yes` to "Do you want to proceed with editing AGENTS.md?"
-  (that option alone, not a custom answer) unlocks edits.
+  Only the answer `Yes` (that option alone, not a custom answer) unlocks
+  edits, only with the header and options shown above, and only to one of
+  two questions: the bare "Do you want to proceed
+  with editing AGENTS.md?", or exactly the question the plugin issued for a
+  target in that session since your last message, with `<change>` replaced
+  by one line of up to 500 characters. Any other text after the first
+  sentence keeps edits denied, so the agent cannot reframe what your `Yes`
+  answers. Line breaks, bidi overrides, terminal escapes and other invisible
+  characters are shown as `\u{…}` escapes in the target and rejected in the
+  change, which also rejects runs of whitespace and blank-looking
+  characters. The plugin does not check that the change describes the edit
+  truthfully, and a long command cut in the middle can hide a write placed
+  there; the ` … ` marks the cut.
 - **Scope of the approval.** It applies to every `AGENTS.md` in that session
   only, and lasts until your next message in it.
 - **Works with `session.permissions: autoaccept`.** The plugin denies instead
