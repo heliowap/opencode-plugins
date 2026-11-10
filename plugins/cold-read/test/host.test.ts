@@ -82,8 +82,9 @@ test("a question with context opens the form on the first call", async () => {
   expect(outcome.results.join("\n")).toContain("Yes")
 }, 60_000)
 
-test("the question tool description the model receives asks for a cold read", async () => {
+test("the question tool the model receives is left unchanged", async () => {
   const outcome = await run([])
   const tool = outcome.calls[0]!.request.tools!.find((t) => t.function.name === "question")!
-  expect(tool.function.description).toContain("Write each question as a cold read")
+  expect(tool.function.description).toContain("Use this tool when you need to ask the user questions during execution.")
+  expect(tool.function.description).not.toContain("cold read")
 }, 60_000)

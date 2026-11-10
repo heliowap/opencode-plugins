@@ -8,7 +8,7 @@ Every OpenCode plugin from `heliowap`, one per directory under `plugins/`. Insta
 | --- | --- | --- |
 | `base-check` | `base-check` | Tells an OpenCode session how stale its git base is, before the first prompt runs, without touching the working tree |
 | `cliproxy-quota` | `cliproxy.quota.server`, `cliproxy.quota`, `cliproxy.quota.refresh` | Shows CLIProxyAPI 5-hour and weekly quota usage in the prompt footer and sidebar |
-| `cold-read` | `cold-read` | Makes agents ask the user self-contained questions: briefs the question tool and rejects terse questions once |
+| `cold-read` | `cold-read` | Makes agents ask the user self-contained questions: rejects terse questions once with a cold-read checklist |
 | `goal` | `goal`, `goal.status`, `goal.controls` | Codex-style `/goal`: a persistent, audited objective that keeps a session working across turns |
 | `model-policy` | `model-policy` | Enforces the model route of delegated subagent work. Absorbs the former `heliowap/opencode-v2-model-routes`, which restricted OpenAI and Anthropic models in the catalog to approved providers. |
 | `protect-agents-md` | `protect-agents-md` | Denies agent edits to the global `AGENTS.md` until the user approves them |

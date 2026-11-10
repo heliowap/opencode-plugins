@@ -6,15 +6,18 @@ Agents tend to ask terse questions full of session jargon ("Remove the gate?",
 "#996 step 4?"), which costs the user a round of questions back before they
 can decide. This plugin works on the built-in `question` tool:
 
-- **Briefs the tool.** It appends a *cold read* checklist to the tool's
-  description, so the model reads it every time it asks: the decision and why
-  it blocks, the verified current state with terms and IDs explained, each
-  option's consequence, and a recommendation.
 - **Rejects a terse question once.** A question under 150 characters is
-  rejected with the same checklist, so the agent rewrites it before the user
+  rejected with a *cold read* checklist (the decision and why it blocks, the
+  verified current state with terms and IDs explained, each option's
+  consequence, and a recommendation), so the agent rewrites it before the user
   sees it. Resubmitting the identical input in the same session passes, so
   fixed-text questions required by other tools (such as `protect-agents-md`'s
   approval question) still reach the user.
+
+The plugin leaves the `question` tool's definition untouched: changing it with
+`tool.transform`, even only its description, stops the TUI from drawing the
+question form (reproduced on OpenCode 2.2.7). Put standing guidance on how to
+ask in your `AGENTS.md` instead.
 
 ## Install
 
