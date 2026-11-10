@@ -1,0 +1,22 @@
+{
+  "name": "opencode-v2-cold-read",
+  "version": "0.1.0",
+  "description": "Makes agents ask the user self-contained questions: briefs the question tool and rejects terse questions once",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.0.24"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@typescript/native-preview": "^7.0.0-dev"
+  },
+  "license": "MIT"
+}
