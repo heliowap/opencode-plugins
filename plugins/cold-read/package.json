@@ -1,7 +1,7 @@
 {
   "name": "opencode-v2-cold-read",
   "version": "0.1.0",
-  "description": "Makes agents ask the user self-contained questions: briefs the question tool and rejects terse questions once",
+  "description": "Makes agents ask the user self-contained questions: rejects terse questions once with a cold-read checklist",
   "type": "module",
   "private": true,
   "exports": {

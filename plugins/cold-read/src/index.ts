@@ -1,17 +1,13 @@
 import { Plugin } from "@opencode/plugin"
 import { Error as ToolError } from "@opencode/plugin/promise/tool"
-import { BRIEF, review } from "./brief.ts"
+import { review } from "./brief.ts"
 
+// The checklist reaches the model only through the rejection message: a tool.transform on the
+// question tool stops the TUI from drawing the question form (reproduced on OpenCode 2.2.7).
 export default Plugin.define({
   id: "cold-read",
   async setup(ctx) {
     const seen = new Set<string>()
-
-    await ctx.tool.transform((editor) => {
-      editor.update("question", (tool) => {
-        tool.description = `${tool.description}\n\n${BRIEF}`
-      })
-    })
 
     await ctx.tool.hook("execute.before", (event) => {
       if (event.tool !== "question") return
