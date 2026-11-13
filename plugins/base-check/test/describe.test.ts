@@ -51,7 +51,7 @@ test("counts a single commit in the singular", () => {
 
 test("says so when the base ref was defaulted instead of configured", () => {
   expect(line(facts({ base: { ...BEHIND, ref: "origin/main", defaulted: true } }), "Base:")).toBe(
-    'Base: 37 commits behind origin/main (the remote\'s default branch; set this plugin\'s "base" option to compare against another).',
+    'Base: 37 commits behind origin/main (the clone\'s local origin/HEAD; set this plugin\'s "base" option to compare against another).',
   )
 })
 

@@ -55,14 +55,14 @@ on its own initiative, and it does not override a rebase you ask for yourself.
 
 ### `base`
 
-The ref the session's base is compared against. Without it the plugin falls back to the remote's own
-default branch (`refs/remotes/origin/HEAD`), which is often **not** the branch you work from: a
+The ref the session's base is compared against. Without it the plugin falls back to the clone's local
+`origin/HEAD` (`refs/remotes/origin/HEAD`), a pointer that is often **not** the branch you work from: a
 repository whose `origin/HEAD` points at `main` while everyone branches off `dev` needs
 `"base": "origin/dev"` to report anything useful. A fallback says so in the report, so a count
 against the wrong branch is never silent:
 
 ```
-Base: 37 commits behind origin/main (the remote's default branch; set this plugin's "base" option to compare against another).
+Base: 37 commits behind origin/main (the clone's local origin/HEAD; set this plugin's "base" option to compare against another).
 ```
 
 A configured ref the repository does not have is reported as such, and when nothing resolves at all

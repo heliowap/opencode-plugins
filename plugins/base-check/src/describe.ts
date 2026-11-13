@@ -11,13 +11,13 @@ const head = (facts: Facts) => {
   return facts.branch ? `Base check: branch ${facts.branch} at ${commit}.` : `Base check: detached HEAD at ${commit}.`
 }
 
-// A defaulted ref says so, because the remote's default branch is often not the branch the work
+// A defaulted ref says so, because the clone's local origin/HEAD is often not the branch the work
 // branches off, and a confident count against the wrong branch is worse than no count.
 const base = (base: Base) => {
   if (base.state === "missing") return `Base: no base ref resolved; set ${OPTION}.`
   if (base.state === "unresolved") return `Base: ${base.ref} does not resolve here; check ${OPTION}.`
   if (base.state === "unreadable") return `Base: the distance to ${base.ref} could not be counted.`
-  const source = base.defaulted ? ` (the remote's default branch; set ${OPTION} to compare against another)` : ""
+  const source = base.defaulted ? ` (the clone's local origin/HEAD; set ${OPTION} to compare against another)` : ""
   if (base.behind === 0) return `Base: current with ${base.ref}${source}.`
   return `Base: ${plural(base.behind, "commit")} behind ${base.ref}${source}.`
 }

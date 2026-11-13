@@ -74,7 +74,7 @@ test("leaves branch and upstream absent on a detached HEAD", async () => {
   expect(facts?.base).toEqual({ state: "behind", ref: "origin/dev", behind: 0, defaulted: false })
 })
 
-test("marks the base as defaulted when it comes from the remote's default branch", async () => {
+test("marks the base as defaulted when it comes from the clone's local origin/HEAD", async () => {
   expect((await inspect(repo.directory))?.base).toEqual({
     state: "behind",
     ref: "origin/dev",
