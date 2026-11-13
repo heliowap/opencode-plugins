@@ -25,6 +25,11 @@ No files were changed: this check only ran git fetch --prune and read-only git c
 
 - **Base** is how far behind your integration branch you are. This is the "stale base" the plugin
   exists for.
+- **Base files** appears only when HEAD is at least 50 commits behind the base. It tells the agent
+  to read the base's files with `git show <ref>:<path>` when the task concerns the base, because this
+  checkout's copies may predate it. The threshold is the `FAR_BEHIND` constant in `src/describe.ts`, not
+  an option: a few commits of drift stay silent, and 751 commits (where a session read a stale
+  `docs/issue-tracker.md`) get the line.
 - **Upstream** is how far your branch diverged from what it tracks, so unpushed commits and commits
   someone else pushed to your branch both show up.
 - **Worktree** counts `git status --porcelain` entries, because they decide whether a rebase is even

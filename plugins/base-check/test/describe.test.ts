@@ -45,6 +45,42 @@ test("says the base is current rather than counting zero commits", () => {
   expect(line(facts({ base: { ...BEHIND, behind: 0 } }), "Base:")).toBe("Base: current with origin/dev.")
 })
 
+test("tells the agent to read the base's files with git show once the gap is large", () => {
+  expect(describe(facts({ base: { ...BEHIND, behind: 751 } }))).toBe(
+    [
+      "Base check: branch dev at f8b803bb3.",
+      "Base: 751 commits behind origin/dev.",
+      "Base files: when the task concerns origin/dev, read them with git show origin/dev:<path>, because this checkout's copies may predate it.",
+      "Upstream: in sync with origin/dev.",
+      "Worktree: clean.",
+      GUARD,
+    ].join("\n"),
+  )
+})
+
+test("starts the git show line at the threshold, and stays silent just below it", () => {
+  expect(line(facts({ base: { ...BEHIND, behind: 50 } }), "Base files:")).toBe(
+    "Base files: when the task concerns origin/dev, read them with git show origin/dev:<path>, because this checkout's copies may predate it.",
+  )
+  expect(line(facts({ base: { ...BEHIND, behind: 49 } }), "Base:")).toBe("Base: 49 commits behind origin/dev.")
+  expect(line(facts({ base: { ...BEHIND, behind: 49 } }), "Base files:")).toBeUndefined()
+})
+
+test("names the defaulted ref in the git show line", () => {
+  expect(line(facts({ base: { ...BEHIND, ref: "origin/main", behind: 751, defaulted: true } }), "Base files:")).toBe(
+    "Base files: when the task concerns origin/main, read them with git show origin/main:<path>, because this checkout's copies may predate it.",
+  )
+})
+
+test("gives no git show line when no base distance was counted", () => {
+  expect(line(facts({ base: { state: "missing" } }), "Base:")).toBe(
+    'Base: no base ref resolved; set this plugin\'s "base" option.',
+  )
+  expect(line(facts({ base: { state: "missing" } }), "Base files:")).toBeUndefined()
+  expect(line(facts({ base: { state: "unresolved", ref: "origin/dev" } }), "Base files:")).toBeUndefined()
+  expect(line(facts({ base: { state: "unreadable", ref: "origin/dev" } }), "Base files:")).toBeUndefined()
+})
+
 test("counts a single commit in the singular", () => {
   expect(line(facts({ base: { ...BEHIND, behind: 1 } }), "Base:")).toBe("Base: 1 commit behind origin/dev.")
 })

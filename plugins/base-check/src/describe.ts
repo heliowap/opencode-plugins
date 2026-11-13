@@ -3,6 +3,9 @@ import type { Base, Facts } from "./facts.ts"
 const GUARD =
   "No files were changed: this check only ran git fetch --prune and read-only git commands. Do not pull, rebase or merge on your own initiative."
 const OPTION = 'this plugin\'s "base" option'
+// A few commits of drift leave the working tree essentially current; a gap this size means many
+// files may differ from the base, so the note tells the agent where to read them instead.
+const FAR_BEHIND = 50
 
 const plural = (count: number, noun: string) => `${count} ${count === 1 ? noun : `${noun}s`}`
 
@@ -21,6 +24,13 @@ const base = (base: Base) => {
   if (base.behind === 0) return `Base: current with ${base.ref}${source}.`
   return `Base: ${plural(base.behind, "commit")} behind ${base.ref}${source}.`
 }
+
+// Only a counted distance can be far behind; the ref is named so the agent runs git show against the
+// branch the count came from.
+const reading = (base: Base) =>
+  base.state === "behind" && base.behind >= FAR_BEHIND
+    ? `Base files: when the task concerns ${base.ref}, read them with git show ${base.ref}:<path>, because this checkout's copies may predate it.`
+    : undefined
 
 // A detached HEAD has no upstream to be in sync with, so it gets no line at all.
 const upstream = (facts: Facts) => {
@@ -43,6 +53,7 @@ export const describe = (facts: Facts) =>
   [
     head(facts),
     base(facts.base),
+    reading(facts.base),
     upstream(facts),
     worktree(facts),
     facts.fetch === "failed"
