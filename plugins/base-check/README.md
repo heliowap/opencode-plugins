@@ -25,6 +25,11 @@ No files were changed: this check only ran git fetch --prune and read-only git c
 
 - **Base** is how far behind your integration branch you are. This is the "stale base" the plugin
   exists for.
+- **Base files** appears only when HEAD is at least 50 commits behind the base. It tells the agent
+  to read the base's files with `git show <ref>:<path>` when the task concerns the base, because this
+  checkout's copies may predate it. The threshold is the `FAR_BEHIND` constant in `src/describe.ts`, not
+  an option: a few commits of drift stay silent, and 751 commits (where a session read a stale
+  `docs/issue-tracker.md`) get the line.
 - **Upstream** is how far your branch diverged from what it tracks, so unpushed commits and commits
   someone else pushed to your branch both show up.
 - **Worktree** counts `git status --porcelain` entries, because they decide whether a rebase is even
@@ -55,14 +60,14 @@ on its own initiative, and it does not override a rebase you ask for yourself.
 
 ### `base`
 
-The ref the session's base is compared against. Without it the plugin falls back to the remote's own
-default branch (`refs/remotes/origin/HEAD`), which is often **not** the branch you work from: a
+The ref the session's base is compared against. Without it the plugin falls back to the clone's local
+`origin/HEAD` (`refs/remotes/origin/HEAD`), a pointer that is often **not** the branch you work from: a
 repository whose `origin/HEAD` points at `main` while everyone branches off `dev` needs
 `"base": "origin/dev"` to report anything useful. A fallback says so in the report, so a count
 against the wrong branch is never silent:
 
 ```
-Base: 37 commits behind origin/main (the remote's default branch; set this plugin's "base" option to compare against another).
+Base: 37 commits behind origin/main (the clone's local origin/HEAD; set this plugin's "base" option to compare against another).
 ```
 
 A configured ref the repository does not have is reported as such, and when nothing resolves at all

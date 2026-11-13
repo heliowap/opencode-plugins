@@ -5,7 +5,7 @@ export type Base =
       readonly state: "behind"
       readonly ref: string
       readonly behind: number
-      /** The ref came from the remote's default branch rather than from configuration. */
+      /** The ref came from the clone's local origin/HEAD rather than from configuration. */
       readonly defaulted: boolean
     }
   /** A ref this repository does not have. */
